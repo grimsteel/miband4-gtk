@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, error::Error, fmt::Display, time::Duration};
+use std::{collections::{HashMap, HashSet}, error::Error, fmt::Display, io, time::Duration};
 
 use bluer::{gatt::remote::{Service, Characteristic}, id::{Characteristic as CharId, Service as ServiceId}, Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, Uuid};
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
@@ -16,29 +16,42 @@ macro_rules! uuid {
 }
 
 uuid!(SERVICE_BAND_0, "0000fee0-0000-1000-8000-00805f9b34fb");
+uuid!(SERVICE_BAND_1, "0000fee1-0000-1000-8000-00805f9b34fb");
 uuid!(CHAR_BATTERY, "00000006-0000-3512-2118-0009af100700");
 uuid!(CHAR_STEPS, "00000007-0000-3512-2118-0009af100700");
+uuid!(CHAR_AUTH, "00000009-0000-3512-2118-0009af100700");
 
 struct BandChars {
     battery: Characteristic,
     steps: Characteristic,
     firm_rev: Characteristic,
-    time: Characteristic
+    time: Characteristic,
+    auth: Characteristic
 }
 
 #[derive(Debug)]
 pub enum BandError {
     BluerError(bluer::Error),
+    IoError(io::Error),
     MissingServicesOrChars,
     NotInitialized,
     InvalidTime,
     Utf8Error,
-    RequiresAuth
+    RequiresAuth,
+    InvalidAuthKey,
+    Failed,
+    UnknownError
 }
 
 impl From<bluer::Error> for BandError {
     fn from(value: bluer::Error) -> Self {
         Self::BluerError(value)
+    }
+}
+
+impl From<io::Error> for BandError {
+    fn from(value: io::Error) -> Self {
+        Self::IoError(value)
     }
 }
 
@@ -48,17 +61,14 @@ impl Display for BandError {
     }
 }
 
-impl Error for BandError {
-    
-}
+impl Error for BandError {}
 
 type Result<T> = std::result::Result<T, BandError>;
 
 pub struct MiBand {
     device: Device,
     pub authenticated: bool,
-    chars: Option<BandChars>,
-    auth_key: Option<Vec<u8>>
+    chars: Option<BandChars>
 }
 
 #[derive(Debug)]
@@ -107,10 +117,9 @@ async fn get_all_chars(service: &Service) -> Result<HashMap<Uuid, Characteristic
 }
 
 impl MiBand {
-    pub fn new(device: Device, auth_key: Option<Vec<u8>>) -> Self {
+    pub fn new(device: Device) -> Self {
         Self {
             device,
-            auth_key,
             authenticated: false,
             chars: None
         }
@@ -140,15 +149,16 @@ impl MiBand {
         // get the services
         let services = get_all_services(&self.device).await?;
 
-        match (services.get(&SERVICE_BAND_0), services.get(&ServiceId::DeviceInformation.into())) {
-            (Some(band_0), Some(device_info)) => {
+        match (services.get(&SERVICE_BAND_0), services.get(&SERVICE_BAND_1), services.get(&ServiceId::DeviceInformation.into())) {
+            (Some(band_0), Some(band_1), Some(device_info)) => {
                 let mut band_0 = get_all_chars(band_0).await?;
+                let mut band_1 = get_all_chars(band_1).await?;
                 let mut device_info = get_all_chars(device_info).await?;
                 // get the characteristics from their respective services
-                match (band_0.remove(&CHAR_BATTERY), band_0.remove(&CHAR_STEPS), band_0.remove(&CharId::CurrentTime.into()), device_info.remove(&CharId::SoftwareRevisionString.into())) {
-                    (Some(battery), Some(steps), Some(time), Some(firm_rev)) => {
+                match (band_0.remove(&CHAR_BATTERY), band_0.remove(&CHAR_STEPS), band_0.remove(&CharId::CurrentTime.into()), device_info.remove(&CharId::SoftwareRevisionString.into()), band_1.remove(&CHAR_AUTH)) {
+                    (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth)) => {
                         let chars = BandChars {
-                            battery, steps, time, firm_rev
+                            battery, steps, time, firm_rev, auth
                         };
 
                         self.chars = Some(chars);
@@ -162,6 +172,31 @@ impl MiBand {
         }
 
         return Err(BandError::MissingServicesOrChars);
+    }
+
+    /// Authenticate with the band
+    pub async fn authenticate(&mut self, auth_key: &[u8]) -> Result<()> {
+        if let Some(BandChars { auth, ..}) = &self.chars {
+            let write_io = auth.write_io().await?;
+
+            // start authentication
+            println!("starting auth");
+            write_io.send(&[0x02, 0x00]).await?;
+            println!("starting notify");
+            let notify = auth.notify_io().await?;
+//            pin_mut!(notify);
+            loop {
+                match notify.recv().await {
+                    Ok(value) => {
+                        println!("{:?}", value);
+                    },
+                    _ => break
+                }
+                break;
+            }
+            println!("done");
+            Ok(())
+        } else { Err(BandError::NotInitialized) }
     }
 
     /// get the battery level and status
