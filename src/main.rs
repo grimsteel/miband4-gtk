@@ -19,7 +19,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut band = MiBand::new(device, None);
     band.initialize().await?;
-    println!("{:?}", band.get_battery().await);
+    let battery_status = band.get_battery().await?;
+    println!("Battery: {:?}", battery_status);
+    println!("Band time: {:?}", band.get_band_time().await?);
+    println!("Firmware: {:?}", band.get_firmware_revision().await?);
     /*let found = discover_mi_bands(&adapter, 50000).await?;
     let test_device = found.values().next().unwrap();
     println!("connecting to device {}", test_device.address());

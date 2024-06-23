@@ -31,7 +31,9 @@ pub enum BandError {
     BluerError(bluer::Error),
     MissingServicesOrChars,
     NotInitialized,
-    InvalidTime
+    InvalidTime,
+    Utf8Error,
+    RequiresAuth
 }
 
 impl From<bluer::Error> for BandError {
@@ -83,11 +85,6 @@ fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
         chrono::offset::LocalResult::Single(time) => Some(time),
         _ => None
     }
-}
-
-fn time_to_bytes(time: &DateTime<Local>) -> Vec<u8> {
-    let year = time.year();
-    vec![(year & 0xff) as u8, (year >> 8) as u8, time.month() as u8, time.day() as u8, time.hour() as u8, time.minute() as u8, time.second() as u8]
 }
 
 // helper functions for getting all services/chars
@@ -167,6 +164,7 @@ impl MiBand {
         return Err(BandError::MissingServicesOrChars);
     }
 
+    /// get the battery level and status
     pub async fn get_battery(&self) -> Result<BatteryStatus> {
         if let Some(BandChars { battery, .. }) = &self.chars {
             let value = battery.read().await?;
@@ -184,7 +182,34 @@ impl MiBand {
             })
         } else { Err(BandError::NotInitialized) }
     }
-    
+
+    /// get the current time on the band
+    pub async fn get_band_time(&self) -> Result<DateTime<Local>> {
+        if let Some(BandChars { time, .. }) = &self.chars {
+            let value = time.read().await?;
+            parse_time(&value).ok_or(BandError::InvalidTime)
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    pub async fn set_band_time(&self, new_time: DateTime<Local>) -> Result<()> {
+        if let Some(BandChars { time, .. }) = &self.chars {
+            let year = new_time.year();
+            let day_of_week = new_time.weekday().num_days_from_sunday() as u8;
+            // year (two bytes), month, day, hour, minute, second, day of week, 3 zeros? (could be timezone)
+            let value = vec![(year & 0xff) as u8, (year >> 8) as u8, new_time.month() as u8, new_time.day() as u8, new_time.hour() as u8, new_time.minute() as u8, new_time.second() as u8, day_of_week, 0, 0, 0];
+            time.write(&value).await?;
+            Ok(())
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    pub async fn get_firmware_revision(&self) -> Result<String> {
+        if let Some(BandChars { firm_rev, .. }) = &self.chars {
+            let value = firm_rev.read().await?;
+            String::from_utf8(value).map_err(|_e| BandError::Utf8Error)
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    /// discover valid mi bands in the area
     pub async fn discover(adapter: &Adapter, timeout: Duration)  -> Result<HashMap<Address, Device>> {
         let mut device_map = HashMap::new();
         
