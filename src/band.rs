@@ -5,6 +5,8 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::pin_mut;
 use tokio_stream::StreamExt;
 
+use crate::utils::encrypt_value;
+
 
 macro_rules! uuid {
     ($var_name:ident,$uuid:expr) => {
@@ -77,6 +79,13 @@ pub struct BatteryStatus {
     last_off: DateTime<Local>,
     last_charge: DateTime<Local>,
     charging: bool
+}
+
+#[derive(Debug)]
+pub struct CurrentActivity {
+    steps: u16,
+    calories: u16,
+    meters: u16
 }
 
 // parse a time out of a 7 byte array
@@ -177,25 +186,48 @@ impl MiBand {
     /// Authenticate with the band
     pub async fn authenticate(&mut self, auth_key: &[u8]) -> Result<()> {
         if let Some(BandChars { auth, ..}) = &self.chars {
-            let write_io = auth.write_io().await?;
+            //let write_io = auth.write_io().await?;
+            println!("starting authentication");
 
-            // start authentication
-            println!("starting auth");
-            write_io.send(&[0x02, 0x00]).await?;
-            println!("starting notify");
+            // note: it's important that we start the notify session before writing
             let notify = auth.notify_io().await?;
-//            pin_mut!(notify);
+            let write = auth.write_io().await?;
+
+            // signal the band to start auth
+            write.send(&[0x02, 0x00]).await?;
             loop {
-                match notify.recv().await {
-                    Ok(value) => {
-                        println!("{:?}", value);
-                    },
-                    _ => break
+                let value = notify.recv().await?;
+                if value[0] == 0x10 && value.len() >= 3 {
+                    match &value[1..3] {
+                        &[0x01, 0x01] => {
+                            // signal to start again
+                            write.send(&[0x02, 0x00]).await?;
+                        },
+                        &[0x02, 0x01] => {
+                            // the band has sent us a 16 byte value to encrypt
+                            let value = &value[3..19];
+                            if let Some(encrypted) = encrypt_value(&auth_key, value) {
+                                // 0x03 0x00 <first 16 bytes of encrypted value>
+                                let response = [&[0x03, 0x00], &encrypted[0..16]].concat();
+                                write.send(&response).await?;
+                            }
+                        },
+                        &[0x03, 0x01] => {
+                            // success
+                            self.authenticated = true;
+                            return Ok(());
+                        },
+                        &[0x03, 0x08] => {
+                            // invalid auth key
+                            return Err(BandError::InvalidAuthKey);
+                        },
+                        
+                        value => {
+                            println!("unknown authentication response {value:?}");
+                        }
+                    }
                 }
-                break;
             }
-            println!("done");
-            Ok(())
         } else { Err(BandError::NotInitialized) }
     }
 
@@ -234,6 +266,18 @@ impl MiBand {
             let value = vec![(year & 0xff) as u8, (year >> 8) as u8, new_time.month() as u8, new_time.day() as u8, new_time.hour() as u8, new_time.minute() as u8, new_time.second() as u8, day_of_week, 0, 0, 0];
             time.write(&value).await?;
             Ok(())
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    pub async fn get_current_activity(&self) -> Result<CurrentActivity> {
+        if let Some(BandChars { steps, .. }) = &self.chars {
+            let value = steps.read().await?;
+            let steps = (value[1] as u16) | ((value[2] as u16) << 8);
+            let meters = (value[5] as u16) | ((value[6] as u16) << 8);
+            let calories = (value[9] as u16) | ((value[10] as u16) << 8);
+            Ok(CurrentActivity {
+                steps, meters, calories
+            })
         } else { Err(BandError::NotInitialized) }
     }
 
