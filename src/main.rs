@@ -3,12 +3,13 @@ use std::{env, error::Error, str::FromStr, time::Duration};
 use band::MiBand;
 use bluer::{Address, Session};
 use chrono::Local;
+use gtk::{glib::ExitCode, prelude::*, Application, ApplicationWindow, Button};
 use utils::decode_hex;
 
 mod band;
 mod utils;
 
-#[tokio::main]
+/*#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let auth_key = env::var("BAND_AUTH_KEY").ok().and_then(|s| decode_hex(&s)).unwrap();
     
@@ -35,4 +36,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //band.set_band_time(Local::now()).await?;
 
     Ok(())
+}*/
+
+const APP_ID: &'static str = "com.github.grimsteel.miband4-gtk";
+
+
+fn main() -> ExitCode {
+    let app = Application::builder().application_id(APP_ID).build();
+    // connect a handler to the activate signal
+    app.connect_activate(build_ui);
+    app.run()
+}
+
+fn build_ui(app: &Application) {
+    let button = Button::builder()
+        .label("Start scan")
+        .margin_top(16)
+        .margin_start(16)
+        .build();
+
+    button.connect_clicked(|b| {
+        b.set_label("Scanning...");
+        b.set_sensitive(false);
+    });
+    
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title("Mi Band 4")
+        .child(&button)
+        .build();
+
+    window.present();
 }
