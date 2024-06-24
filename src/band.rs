@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, error::Error, fmt::Display, io, time::Duration};
 
-use bluer::{gatt::remote::{Service, Characteristic}, id::{Characteristic as CharId, Service as ServiceId}, Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, Uuid};
+use bluer::{gatt::{remote::{Characteristic, CharacteristicWriteRequest, Service}, WriteOp}, id::{Characteristic as CharId, Service as ServiceId}, Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, Uuid};
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::pin_mut;
 use tokio_stream::StreamExt;
@@ -138,6 +138,7 @@ impl MiBand {
         self.device.is_connected().await.unwrap_or(false)
     }
 
+    /// connect to the band and fetch all GATT characteristics
     pub async fn initialize(&mut self) -> Result<()> {
         // first connect if needed
         let was_connected = self.is_connected().await;
@@ -153,6 +154,7 @@ impl MiBand {
         Ok(())
     }
 
+    /// iterate through all the services and characteristics in order to find the ones we need
     /// Note: device must be connected here
     async fn fetch_chars(&mut self) -> Result<()> {
         // get the services
@@ -186,8 +188,6 @@ impl MiBand {
     /// Authenticate with the band
     pub async fn authenticate(&mut self, auth_key: &[u8]) -> Result<()> {
         if let Some(BandChars { auth, ..}) = &self.chars {
-            //let write_io = auth.write_io().await?;
-            println!("starting authentication");
 
             // note: it's important that we start the notify session before writing
             let notify = auth.notify_io().await?;
@@ -258,17 +258,26 @@ impl MiBand {
         } else { Err(BandError::NotInitialized) }
     }
 
+    /// set the time on the band to a specific value
     pub async fn set_band_time(&self, new_time: DateTime<Local>) -> Result<()> {
+        if !self.authenticated { return Err(BandError::RequiresAuth) }
+        
         if let Some(BandChars { time, .. }) = &self.chars {
             let year = new_time.year();
             let day_of_week = new_time.weekday().num_days_from_sunday() as u8;
             // year (two bytes), month, day, hour, minute, second, day of week, 3 zeros? (could be timezone)
             let value = vec![(year & 0xff) as u8, (year >> 8) as u8, new_time.month() as u8, new_time.day() as u8, new_time.hour() as u8, new_time.minute() as u8, new_time.second() as u8, day_of_week, 0, 0, 0];
-            time.write(&value).await?;
+            let write_req = CharacteristicWriteRequest {
+                op_type: WriteOp::Request,
+                prepare_authorize: true,
+                ..Default::default()
+            };
+            time.write_ext(&value, &write_req).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
     }
 
+    /// get the current step count, meters walked, and calories burned
     pub async fn get_current_activity(&self) -> Result<CurrentActivity> {
         if let Some(BandChars { steps, .. }) = &self.chars {
             let value = steps.read().await?;
@@ -281,6 +290,7 @@ impl MiBand {
         } else { Err(BandError::NotInitialized) }
     }
 
+    // firmware revision (software revision string)
     pub async fn get_firmware_revision(&self) -> Result<String> {
         if let Some(BandChars { firm_rev, .. }) = &self.chars {
             let value = firm_rev.read().await?;

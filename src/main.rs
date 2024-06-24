@@ -25,13 +25,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut band = MiBand::new(device);
     band.initialize().await?;
     let battery_status = band.get_battery().await?;
-    println!("Battery: {:?}", battery_status);
+    //println!("Battery: {:?}", battery_status);
     println!("Band time: {:?}", band.get_band_time().await?);
-    println!("Firmware: {:?}", band.get_firmware_revision().await?);
-    band.authenticate(&auth_key).await?;
+    //println!("Firmware: {:?}", band.get_firmware_revision().await?);
+    //band.authenticate(&auth_key).await?;
     //println!("setting time");
     //band.set_band_time(Local::now()).await?;
-    println!("Activity: {:?}", band.get_current_activity().await?);
+    //println!("Activity: {:?}", band.get_current_activity().await?);
+    //band.set_band_time(Local::now()).await?;
 
     Ok(())
 }
