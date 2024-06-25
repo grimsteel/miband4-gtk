@@ -17,6 +17,8 @@ pub struct DiscoveryFilter {
     pub transport: String
 }
 
+// #region Bluez interfaces
+
 #[proxy(default_service = "org.bluez", default_path = "/org/bluez/hci0", interface = "org.bluez.Adapter1", gen_blocking = false)]
 trait Adapter {
     fn get_discovery_filters(&self) -> zbus::Result<Vec<String>>;
@@ -27,6 +29,33 @@ trait Adapter {
     #[zbus(property)]
     fn powered(&self) -> zbus::Result<bool>;
 }
+
+#[proxy(default_service = "org.bluez", interface = "org.bluez.Device1", gen_blocking = false)]
+trait BluezDevice {
+    fn connect_profile(&self, uuid: &str) -> zbus::Result<()>;
+    fn disconnect(&self) -> zbus::Result<()>;
+
+    #[zbus(property)]
+    fn address(&self) -> zbus::Result<String>;
+    #[zbus(property)]
+    fn connected(&self) -> zbus::Result<bool>;
+}
+
+#[proxy(default_service = "org.bluez", interface = "org.bluez.GattService1", gen_blocking = false)]
+trait GattService {
+    #[zbus(property, name = "UUID")]
+    fn uuid(&self) -> zbus::Result<String>;
+}
+
+#[proxy(default_service = "org.bluez", interface = "org.bluez.GattCharacteristic1", gen_blocking = false)]
+trait GattCharacteristic {
+    #[zbus(property, name = "UUID")]
+    fn uuid(&self) -> zbus::Result<String>;
+    #[zbus(property)]
+    fn service(&self) -> zbus::Result<ObjectPath>;
+}
+
+// #endregion
 
 #[derive(Clone)]
 pub struct BluezSession<'a> {
@@ -106,6 +135,13 @@ impl<'a> BluezSession<'a> {
         });
 
         Ok(select(added_devices, removed_devices))
+    }
+
+    pub async fn get_device_characteristics<'b>(&self, device_path: ObjectPath<'b>) -> zbus::Result<()> {
+        // map of service UUID to object path
+        let services = HashMap::<String, ObjectPath>::new();
+        // mpa of service object path
+        Ok(())
     }
 }
 

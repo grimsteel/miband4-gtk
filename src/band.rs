@@ -116,7 +116,7 @@ async fn get_all_chars(service: &Service) -> Result<HashMap<Uuid, Characteristic
 }*/
 
 impl MiBand {
-    /*pub fn new(device: Device) -> Self {
+    pub fn new(device: Device) -> Self {
         Self {
             device,
             authenticated: false,
@@ -124,7 +124,7 @@ impl MiBand {
         }
     }
 
-    pub async fn is_connected(&self) -> bool {
+    /*pub async fn is_connected(&self) -> bool {
         self.device.is_connected().await.unwrap_or(false)
     }
 
