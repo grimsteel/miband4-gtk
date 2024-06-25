@@ -9,5 +9,6 @@ async-io = "2.3.3"
 cbc = "0.1.2"
 chrono = "0.4.38"
 futures = "0.3.30"
+futures-util = "0.3.30"
 gtk = { version = "0.8.2", package = "gtk4", features = ["v4_6"] }
 zbus = "4.3.0"

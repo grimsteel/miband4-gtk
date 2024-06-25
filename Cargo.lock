@@ -933,6 +933,7 @@ dependencies = [
  "cbc",
  "chrono",
  "futures",
+ "futures-util",
  "gtk4",
  "zbus",
 ]

@@ -3,9 +3,9 @@ use std::{collections::{HashMap, HashSet}, error::Error, fmt::Display, io, time:
 use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::pin_mut;
-use zbus::zvariant::ObjectPath;
+use zbus::zvariant::OwnedObjectPath;
 
-use crate::{bluez::{AdapterProxy, DiscoveryFilter}, utils::encrypt_value};
+use crate::{bluez::{AdapterProxy, BluezSession, Device, DiscoveryFilter}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -14,11 +14,11 @@ const CHAR_STEPS: &'static str = "00000007-0000-3512-2118-0009af100700";
 const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
 
 struct BandChars {
-    battery: Characteristic,
-    steps: Characteristic,
-    firm_rev: Characteristic,
-    time: Characteristic,
-    auth: Characteristic
+    battery: OwnedObjectPath,
+    steps: OwnedObjectPath,
+    firm_rev: OwnedObjectPath,
+    time: OwnedObjectPath,
+    auth: OwnedObjectPath
 }
 
 #[derive(Debug)]
@@ -96,7 +96,7 @@ fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
     }
 }
 
-// helper functions for getting all services/chars
+/*// helper functions for getting all services/chars
 async fn get_all_services(device: &Device) -> Result<HashMap<Uuid, Service>> {
     let mut map = HashMap::new();
     for service in device.services().await? {
@@ -113,10 +113,10 @@ async fn get_all_chars(service: &Service) -> Result<HashMap<Uuid, Characteristic
         map.insert(uuid, characteristic);
     }
     Ok(map)
-}
+}*/
 
 impl MiBand {
-    pub fn new(device: Device) -> Self {
+    /*pub fn new(device: Device) -> Self {
         Self {
             device,
             authenticated: false,
@@ -286,31 +286,34 @@ impl MiBand {
             let value = firm_rev.read().await?;
             String::from_utf8(value).map_err(|_e| BandError::Utf8Error)
         } else { Err(BandError::NotInitialized) }
-    }
+    }*/
 
     /// discover valid mi bands in the area
-    pub async fn discover<'a>(adapter: AdapterProxy<'a>, timeout: Duration)  -> Result<HashMap<String, ObjectPath>> {
-        let mut device_map = HashMap::new();
-        
-        if !adapter.powered().await? {
-            eprintln!("Adapter is not on");
-            return Ok(device_map)
-        }
+    pub async fn discover<'a>(session: BluezSession<'a>, timeout: Duration)  -> Result<HashMap<String, OwnedObjectPath>> {
+
+        let existing_devices = session.get_devices().await?;
+        let mut device_map = existing_devices.into_iter()
+            .filter_map(|device| {
+                if device.services.contains(SERVICE_BAND_0) {
+                    // this is a mi band
+                    Some((device.address, device.path))
+                } else { None }
+            })
+            .collect();
 
         // filter to just the mi band service
         let filter = DiscoveryFilter {
             uuids: vec![SERVICE_BAND_0.into()],
             transport: "le".into(),
-            duplicate_data: false,
-            pattern: "Mi Smart Band 4".into(),
+            duplicate_data: false
         };
         
-        adapter.set_discovery_filter(filter).await?;
-        adapter.start_discovery().await?;
+        session.adapter.set_discovery_filter(filter).await?;
+        session.adapter.start_discovery().await?;
+        let stream = session.stream_new_devices().await?;
         Timer::after(timeout).await;
-        adapter.stop_discovery().await?;
+        session.adapter.stop_discovery().await?;
         /*
-        let devices = adapter.start_dis.await?.timeout(timeout);
         pin_mut!(devices);
         while let Some(Ok(event)) = devices.next().await {
             match event {

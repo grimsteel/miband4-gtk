@@ -1,6 +1,7 @@
 use std::{env, error::Error, str::FromStr, time::Duration};
 
-use bluez::AdapterProxy;
+use band::MiBand;
+use bluez::{AdapterProxy, BluezSession};
 use chrono::Local;
 use gtk::{glib::{spawn_future_local, ExitCode}, prelude::*, Application, ApplicationWindow, Box as GBox, Button, HeaderBar, Label, Orientation};
 use utils::decode_hex;
@@ -92,12 +93,11 @@ fn build_ui(app: &Application) {
     window.present();
 
     spawn_future_local(async move {
-        if let Ok(connection) = Connection::system().await {
-            if let Ok(proxy) = AdapterProxy::new(&connection).await {
-                let powered = proxy.powered().await.unwrap_or(false);
-                button.set_visible(powered);
-                text_unpowered.set_visible(!powered);
-            }
+        if let Ok(session) = BluezSession::new().await {
+            let powered = session.adapter.powered().await.unwrap_or(false);
+            button.set_visible(powered);
+            text_unpowered.set_visible(!powered);
+            println!("{:?}", MiBand::discover(session.clone(), Duration::from_secs(2)).await);
         }
     });
 }
