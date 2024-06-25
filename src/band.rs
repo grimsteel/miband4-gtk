@@ -1,27 +1,17 @@
 use std::{collections::{HashMap, HashSet}, error::Error, fmt::Display, io, time::Duration};
 
-use bluer::{gatt::{remote::{Characteristic, CharacteristicWriteRequest, Service}, WriteOp}, id::{Characteristic as CharId, Service as ServiceId}, Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, Uuid};
+use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::pin_mut;
-use tokio_stream::StreamExt;
+use zbus::zvariant::ObjectPath;
 
-use crate::utils::encrypt_value;
+use crate::{bluez::{AdapterProxy, DiscoveryFilter}, utils::encrypt_value};
 
-
-macro_rules! uuid {
-    ($var_name:ident,$uuid:expr) => {
-        const $var_name: Uuid = match Uuid::try_parse($uuid) {
-            Ok(u) => u,
-            _ => panic!("bad uuid")
-        };
-    }
-}
-
-uuid!(SERVICE_BAND_0, "0000fee0-0000-1000-8000-00805f9b34fb");
-uuid!(SERVICE_BAND_1, "0000fee1-0000-1000-8000-00805f9b34fb");
-uuid!(CHAR_BATTERY, "00000006-0000-3512-2118-0009af100700");
-uuid!(CHAR_STEPS, "00000007-0000-3512-2118-0009af100700");
-uuid!(CHAR_AUTH, "00000009-0000-3512-2118-0009af100700");
+const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
+const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
+const CHAR_BATTERY: &'static str = "00000006-0000-3512-2118-0009af100700";
+const CHAR_STEPS: &'static str = "00000007-0000-3512-2118-0009af100700";
+const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
 
 struct BandChars {
     battery: Characteristic,
@@ -33,7 +23,7 @@ struct BandChars {
 
 #[derive(Debug)]
 pub enum BandError {
-    BluerError(bluer::Error),
+    DBusError(zbus::Error),
     IoError(io::Error),
     MissingServicesOrChars,
     NotInitialized,
@@ -45,9 +35,9 @@ pub enum BandError {
     UnknownError
 }
 
-impl From<bluer::Error> for BandError {
-    fn from(value: bluer::Error) -> Self {
-        Self::BluerError(value)
+impl From<zbus::Error> for BandError {
+    fn from(value: zbus::Error) -> Self {
+        Self::DBusError(value)
     }
 }
 
@@ -299,30 +289,28 @@ impl MiBand {
     }
 
     /// discover valid mi bands in the area
-    pub async fn discover(adapter: &Adapter, timeout: Duration)  -> Result<HashMap<Address, Device>> {
+    pub async fn discover<'a>(adapter: AdapterProxy<'a>, timeout: Duration)  -> Result<HashMap<String, ObjectPath>> {
         let mut device_map = HashMap::new();
         
-        if !adapter.is_powered().await? {
+        if !adapter.powered().await? {
             eprintln!("Adapter is not on");
-            return Ok(device_map)
-        }
-        if adapter.is_discovering().await? {
-            eprintln!("Adapter is already discovering");
             return Ok(device_map)
         }
 
         // filter to just the mi band service
         let filter = DiscoveryFilter {
-            uuids: HashSet::from([SERVICE_BAND_0]),
-            transport: DiscoveryTransport::Le,
+            uuids: vec![SERVICE_BAND_0.into()],
+            transport: "le".into(),
             duplicate_data: false,
-            discoverable: false,
-            ..Default::default()
+            pattern: "Mi Smart Band 4".into(),
         };
         
         adapter.set_discovery_filter(filter).await?;
-        // start discovering
-        let devices = adapter.discover_devices().await?.timeout(timeout);
+        adapter.start_discovery().await?;
+        Timer::after(timeout).await;
+        adapter.stop_discovery().await?;
+        /*
+        let devices = adapter.start_dis.await?.timeout(timeout);
         pin_mut!(devices);
         while let Some(Ok(event)) = devices.next().await {
             match event {
@@ -341,7 +329,7 @@ impl MiBand {
                 }
                 _ => {}
             }
-        }
+        }*/
         
         Ok(device_map)
     }

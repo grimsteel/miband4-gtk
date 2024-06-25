@@ -5,10 +5,9 @@ edition = "2021"
 
 [dependencies]
 aes = "0.8.4"
-bluer = { version = "0.17.1", features = ["bluetoothd", "id"] }
+async-io = "2.3.3"
 cbc = "0.1.2"
 chrono = "0.4.38"
 futures = "0.3.30"
 gtk = { version = "0.8.2", package = "gtk4", features = ["v4_6"] }
-tokio = { version = "1.38.0", features = ["macros", "rt", "rt-multi-thread", "sync", "time", "io-util", "io-std"] }
-tokio-stream = "0.1.15"
+zbus = "4.3.0"

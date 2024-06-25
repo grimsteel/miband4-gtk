@@ -1,13 +1,14 @@
 use std::{env, error::Error, str::FromStr, time::Duration};
 
-use band::MiBand;
-use bluer::{Address, Session};
+use bluez::AdapterProxy;
 use chrono::Local;
-use gtk::{glib::ExitCode, prelude::*, Application, ApplicationWindow, Button};
+use gtk::{glib::{spawn_future_local, ExitCode}, prelude::*, Application, ApplicationWindow, Box as GBox, Button, HeaderBar, Label, Orientation};
 use utils::decode_hex;
+use zbus::Connection;
 
 mod band;
 mod utils;
+mod bluez;
 
 /*#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -48,23 +49,55 @@ fn main() -> ExitCode {
     app.run()
 }
 
-fn build_ui(app: &Application) {
+fn build_ui(app: &Application) {    
     let button = Button::builder()
         .label("Start scan")
-        .margin_top(16)
-        .margin_start(16)
         .build();
 
     button.connect_clicked(|b| {
         b.set_label("Scanning...");
         b.set_sensitive(false);
     });
+
+    let text_unpowered = Label::builder()
+        .label("Bluetooth is off")
+        .build();
+
+    let g_box = GBox::builder()
+        .orientation(Orientation::Vertical)
+        .margin_bottom(16)
+        .margin_top(16)
+        .margin_start(16)
+        .margin_end(16)
+        .build();
+
+    g_box.append(&button);
+    g_box.append(&text_unpowered);
+
+    let title = Label::builder()
+        .label("Mi Band 4")
+        .build();
+
+    let titlebar = HeaderBar::builder()
+        .title_widget(&title)
+        .build();
     
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Mi Band 4")
-        .child(&button)
+        .child(&g_box)
+        .titlebar(&titlebar)
         .build();
-
+    
     window.present();
+
+    spawn_future_local(async move {
+        if let Ok(connection) = Connection::system().await {
+            if let Ok(proxy) = AdapterProxy::new(&connection).await {
+                let powered = proxy.powered().await.unwrap_or(false);
+                button.set_visible(powered);
+                text_unpowered.set_visible(!powered);
+            }
+        }
+    });
 }
