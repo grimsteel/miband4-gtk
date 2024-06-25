@@ -1,11 +1,11 @@
-use std::{collections::{HashMap, HashSet}, error::Error, fmt::Display, io, time::Duration};
+use std::{collections::HashMap, error::Error, fmt::Display, io, time::Duration};
 
 use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use futures::pin_mut;
+use futures::{pin_mut, select, FutureExt, StreamExt};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{bluez::{AdapterProxy, BluezSession, Device, DiscoveryFilter}, utils::encrypt_value};
+use crate::{bluez::{AdapterProxy, BluezSession, Device, DeviceEvent, DiscoveryFilter}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -289,14 +289,14 @@ impl MiBand {
     }*/
 
     /// discover valid mi bands in the area
-    pub async fn discover<'a>(session: BluezSession<'a>, timeout: Duration)  -> Result<HashMap<String, OwnedObjectPath>> {
+    pub async fn discover<'a>(session: BluezSession<'a>, timeout: Duration)  -> Result<HashMap<OwnedObjectPath, String>> {
 
         let existing_devices = session.get_devices().await?;
-        let mut device_map = existing_devices.into_iter()
+        let mut device_map: HashMap<OwnedObjectPath, String> = existing_devices.into_iter()
             .filter_map(|device| {
                 if device.services.contains(SERVICE_BAND_0) {
                     // this is a mi band
-                    Some((device.address, device.path))
+                    Some((device.path, device.address))
                 } else { None }
             })
             .collect();
@@ -307,32 +307,34 @@ impl MiBand {
             transport: "le".into(),
             duplicate_data: false
         };
-        
+
+        // start discovery
         session.adapter.set_discovery_filter(filter).await?;
         session.adapter.start_discovery().await?;
-        let stream = session.stream_new_devices().await?;
-        Timer::after(timeout).await;
-        session.adapter.stop_discovery().await?;
-        /*
-        pin_mut!(devices);
-        while let Some(Ok(event)) = devices.next().await {
-            match event {
-                AdapterEvent::DeviceAdded(addr) => {
-                    if let Ok(device) = adapter.device(addr.clone()) {
-                        // limit to devices that are actually present
-                        // add it to the map
-                        device_map.insert(addr, device);
-                        
-                        // temp helper:
-                        break;
+        let stream = session.stream_device_events().await?.fuse();
+        pin_mut!(stream);
+        let mut timeout = FutureExt::fuse(Timer::after(timeout));
+        loop {
+            select! {
+                event = stream.next() => {
+                    match event {
+                        Some(DeviceEvent::DeviceAdded(Device { address, path, services })) => {
+                             // add each new device to the device map as long as it contains our service
+                            // we need to check for the service here because the DiscoveryFilter isn't reliable
+                            if services.contains(SERVICE_BAND_0) {
+                                device_map.insert(path, address);
+                            }
+                        },
+                        Some(DeviceEvent::DeviceRemoved(path)) => {
+                            device_map.remove(&path);
+                        },
+                        _ => {}
                     }
                 },
-                AdapterEvent::DeviceRemoved(addr) => {
-                    device_map.remove(&addr);
-                }
-                _ => {}
+                _ = timeout => { break; }
             }
-        }*/
+        }
+        session.adapter.stop_discovery().await?;
         
         Ok(device_map)
     }

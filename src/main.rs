@@ -97,7 +97,7 @@ fn build_ui(app: &Application) {
             let powered = session.adapter.powered().await.unwrap_or(false);
             button.set_visible(powered);
             text_unpowered.set_visible(!powered);
-            println!("{:?}", MiBand::discover(session.clone(), Duration::from_secs(2)).await);
+            println!("{:?}", MiBand::discover(session.clone(), Duration::from_secs(10)).await);
         }
     });
 }

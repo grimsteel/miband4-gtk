@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use futures::stream::FilterMap;
-use zbus::{fdo::{ObjectManagerProxy, InterfacesAddedStream, InterfacesAdded}, names::OwnedInterfaceName, proxy, zvariant::{Array, DeserializeDict, ObjectPath, OwnedObjectPath, OwnedValue, SerializeDict, Type}, Connection};
+use zbus::{fdo::{ObjectManagerProxy, InterfacesAdded}, names::OwnedInterfaceName, proxy, zvariant::{DeserializeDict, ObjectPath, OwnedObjectPath, OwnedValue, SerializeDict, Type}, Connection};
+
+use futures::stream::select;
 
 use futures_util::StreamExt;
 
@@ -47,19 +48,26 @@ impl<'a> BluezSession<'a> {
         })
     }
 
-    pub async fn get_devices(&self) -> zbus::Result<Vec<Device>> {
-        let objects: HashMap<OwnedObjectPath, HashMap<OwnedInterfaceName, HashMap<String, OwnedValue>>> = self.object_manager.get_managed_objects().await?;
+    /// make sure `path` under our adapter and it is not a subpath of a device (which would contain a '/')
+    fn is_device_path(&self, path: &ObjectPath) -> bool {
         let adapter_path = self.adapter.0.path().as_str();
+        path.strip_prefix(adapter_path)
+            // the first character will be a '/'
+            .map(|relative_path| !&relative_path[1..].contains('/'))
+            .unwrap_or(false)
+    }
+
+    pub async fn get_devices(&self) -> zbus::Result<Vec<Device>> {
+        // get existing managed objects
+        let objects: HashMap<OwnedObjectPath, HashMap<OwnedInterfaceName, HashMap<String, OwnedValue>>> = self.object_manager.get_managed_objects().await?;
+
+        // convert each item into a Device
         Ok(objects.into_iter()
            .filter_map(|(path, mut value)| {
-               // make sure it's under our adapter and it is not a subpath of a device (which would contain a '/')
-               if path.strip_prefix(adapter_path)
-                   .and_then(|p| p.strip_prefix('/'))
-                   .map(|relative_path| !relative_path.contains('/'))
-                   .unwrap_or(false)
-               {
+               if self.is_device_path(&path) {
                    let mut device = value.remove("org.bluez.Device1")?;
                    let address: String = device.remove("Address")?.try_into().ok()?;
+                   // convert to Vec, then collect into HashSet
                    let services = Vec::<_>::try_from(device.remove("UUIDs")?).ok()?.into_iter().collect();
                    Some(Device {
                        path,
@@ -71,28 +79,40 @@ impl<'a> BluezSession<'a> {
             .collect())
     }
 
-    pub async fn stream_new_devices(&'a self) -> zbus::Result<impl futures_util::Stream + 'a> {
-        let objects: InterfacesAddedStream = self.object_manager.receive_interfaces_added().await?;
+    pub async fn stream_device_events(&'a self) -> zbus::Result<impl futures_util::Stream<Item = DeviceEvent> + 'a> {
+        let added_objects = self.object_manager.receive_interfaces_added().await?;
+        let removed_objects = self.object_manager.receive_interfaces_removed().await?;
 
-        let adapter_path = self.adapter.0.path().as_str();
-        Ok(objects.filter_map(move |signal: InterfacesAdded| async move {
+        let added_devices = added_objects.filter_map(move |signal: InterfacesAdded| async move {
             let args = signal.args().ok()?;
-            if args.object_path.strip_prefix(adapter_path)
-                .and_then(|p| p.strip_prefix('/'))
-                .map(|relative_path| !relative_path.contains('/'))
-                .unwrap_or(false)
-            {
+            if self.is_device_path(&args.object_path) {
                 let device = args.interfaces_and_properties.get("org.bluez.Device1")?;
                 let address: String = device.get("Address")?.try_into().ok()?;
                 let services = Vec::<_>::try_from(device.get("UUIDs")?.try_to_owned().unwrap()).ok()?.into_iter().collect();
-                Some(Device {
+                Some(DeviceEvent::DeviceAdded(Device {
                     path: args.object_path.into(),
                     address,
                     services
-                })
+                }))
             } else { None }
-        }))
+        });
+
+        let removed_devices = removed_objects.filter_map(move |signal| async move {
+            let args = signal.args().ok()?;
+            // if this is a device, and one of the removed interfaces was Device1
+            if self.is_device_path(&args.object_path) && args.interfaces.contains(&"org.bluez.Device1") {
+                Some(DeviceEvent::DeviceRemoved(args.object_path.into()))
+            } else { None }
+        });
+
+        Ok(select(added_devices, removed_devices))
     }
+}
+
+#[derive(Debug)]
+pub enum DeviceEvent {
+    DeviceAdded(Device),
+    DeviceRemoved(OwnedObjectPath)
 }
 
 #[derive(Debug, Clone)]
