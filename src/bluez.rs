@@ -31,8 +31,8 @@ trait Adapter {
 }
 
 #[proxy(default_service = "org.bluez", interface = "org.bluez.Device1", gen_blocking = false)]
-trait BluezDevice {
-    fn connect_profile(&self, uuid: &str) -> zbus::Result<()>;
+trait Device {
+    fn connect(&self) -> zbus::Result<()>;
     fn disconnect(&self) -> zbus::Result<()>;
 
     #[zbus(property)]
@@ -56,6 +56,24 @@ trait GattCharacteristic {
 }
 
 // #endregion
+
+
+// Map of service id to map of char id to proxy
+pub type DeviceServiceChars<'a> = HashMap<String, HashMap<String, GattCharacteristicProxy<'a>>>;
+
+#[derive(Debug)]
+pub enum DiscoveredDeviceEvent {
+    DeviceAdded(DiscoveredDevice),
+    DeviceRemoved(OwnedObjectPath)
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveredDevice {
+    pub path: OwnedObjectPath,
+    pub address: String,
+    pub services: HashSet<String>
+}
+
 
 #[derive(Clone)]
 pub struct BluezSession<'a> {
@@ -86,7 +104,8 @@ impl<'a> BluezSession<'a> {
             .unwrap_or(false)
     }
 
-    pub async fn get_devices(&self) -> zbus::Result<Vec<Device>> {
+    /// get all known devices
+    pub async fn get_devices(&self) -> zbus::Result<Vec<DiscoveredDevice>> {
         // get existing managed objects
         let objects: HashMap<OwnedObjectPath, HashMap<OwnedInterfaceName, HashMap<String, OwnedValue>>> = self.object_manager.get_managed_objects().await?;
 
@@ -98,7 +117,7 @@ impl<'a> BluezSession<'a> {
                    let address: String = device.remove("Address")?.try_into().ok()?;
                    // convert to Vec, then collect into HashSet
                    let services = Vec::<_>::try_from(device.remove("UUIDs")?).ok()?.into_iter().collect();
-                   Some(Device {
+                   Some(DiscoveredDevice {
                        path,
                        address,
                        services
@@ -108,7 +127,8 @@ impl<'a> BluezSession<'a> {
             .collect())
     }
 
-    pub async fn stream_device_events(&'a self) -> zbus::Result<impl futures_util::Stream<Item = DeviceEvent> + 'a> {
+    /// stream device added/removed events
+    pub async fn stream_device_events(&'a self) -> zbus::Result<impl futures_util::Stream<Item = DiscoveredDeviceEvent> + 'a> {
         let added_objects = self.object_manager.receive_interfaces_added().await?;
         let removed_objects = self.object_manager.receive_interfaces_removed().await?;
 
@@ -118,7 +138,7 @@ impl<'a> BluezSession<'a> {
                 let device = args.interfaces_and_properties.get("org.bluez.Device1")?;
                 let address: String = device.get("Address")?.try_into().ok()?;
                 let services = Vec::<_>::try_from(device.get("UUIDs")?.try_to_owned().unwrap()).ok()?.into_iter().collect();
-                Some(DeviceEvent::DeviceAdded(Device {
+                Some(DiscoveredDeviceEvent::DeviceAdded(DiscoveredDevice {
                     path: args.object_path.into(),
                     address,
                     services
@@ -130,30 +150,57 @@ impl<'a> BluezSession<'a> {
             let args = signal.args().ok()?;
             // if this is a device, and one of the removed interfaces was Device1
             if self.is_device_path(&args.object_path) && args.interfaces.contains(&"org.bluez.Device1") {
-                Some(DeviceEvent::DeviceRemoved(args.object_path.into()))
+                Some(DiscoveredDeviceEvent::DeviceRemoved(args.object_path.into()))
             } else { None }
         });
 
         Ok(select(added_devices, removed_devices))
     }
 
-    pub async fn get_device_characteristics<'b>(&self, device_path: ObjectPath<'b>) -> zbus::Result<()> {
+    /// Get all services/characteristics under a device
+    /// Returns a map of service UUID to map of char UUID to char proxy
+    pub async fn get_device_characteristics<'b, 'c>(&'c self, device_path: ObjectPath<'b>) -> zbus::Result<DeviceServiceChars<'c>> {
         // map of service UUID to object path
-        let services = HashMap::<String, ObjectPath>::new();
-        // mpa of service object path
-        Ok(())
+        let mut services = HashMap::<String, OwnedObjectPath>::new();
+        // map of service object path to map of characteristic uuid to characteristic path
+        let mut service_chars = HashMap::<OwnedObjectPath, HashMap::<String, GattCharacteristicProxy>>::new();
+
+        let device_path = device_path.as_str();
+
+        // iterate through all objects, finding the chars and services
+        let objects: HashMap<OwnedObjectPath, HashMap<OwnedInterfaceName, HashMap<String, OwnedValue>>> = self.object_manager.get_managed_objects().await?;
+
+        for (path, mut interfaces) in objects {
+            // make sure it's under this device
+            if path.starts_with(device_path) {
+                if let Some(mut service) = interfaces.remove("org.bluez.GattService1") {
+                    // get the uuid for this service
+                    if let Some(uuid) = service.remove("UUID").and_then(|a| a.try_into().ok()) {
+                        services.insert(uuid, path);
+                    }
+                } else if let Some(mut characteristic) = interfaces.remove("org.bluez.GattCharacteristic1") {
+                    if let Some(service_path) = characteristic.remove("Service").and_then(|a| a.try_into().ok()) {
+                        let char_map = service_chars.entry(service_path).or_insert_with(|| HashMap::new());
+                        // get the uuid for this char
+                        if let Some(uuid) = characteristic.remove("UUID").and_then(|a| a.try_into().ok()) {
+                            // make a connection proxy
+                            if let Ok(char_proxy) = GattCharacteristicProxy::builder(&self.connection).path(path).expect("is a valid path").build().await {
+                                char_map.insert(uuid, char_proxy);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // combine the two maps above
+        Ok(services.into_iter().map(|(uuid, path)| {
+            let chars = service_chars.remove(&path).unwrap_or_else(|| HashMap::new());
+            (uuid, chars)
+        }).collect())
     }
-}
 
-#[derive(Debug)]
-pub enum DeviceEvent {
-    DeviceAdded(Device),
-    DeviceRemoved(OwnedObjectPath)
-}
-
-#[derive(Debug, Clone)]
-pub struct Device {
-    pub path: OwnedObjectPath,
-    pub address: String,
-    pub services: HashSet<String>
+    pub async fn proxy_from_discovered_device<'b>(&self, device: &DiscoveredDevice) -> zbus::Result<DeviceProxy<'b>> {
+        DeviceProxy::builder(&self.connection).path(device.path.to_owned()).expect("is a valid path").build().await
+    }
 }

@@ -5,7 +5,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{pin_mut, select, FutureExt, StreamExt};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{bluez::{AdapterProxy, BluezSession, Device, DeviceEvent, DiscoveryFilter}, utils::encrypt_value};
+use crate::{bluez::{AdapterProxy, BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -13,12 +13,12 @@ const CHAR_BATTERY: &'static str = "00000006-0000-3512-2118-0009af100700";
 const CHAR_STEPS: &'static str = "00000007-0000-3512-2118-0009af100700";
 const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
 
-struct BandChars {
-    battery: OwnedObjectPath,
-    steps: OwnedObjectPath,
-    firm_rev: OwnedObjectPath,
-    time: OwnedObjectPath,
-    auth: OwnedObjectPath
+struct BandChars<'a> {
+    battery: GattCharacteristicProxy<'a>,
+    steps: GattCharacteristicProxy<'a>,
+    firm_rev: GattCharacteristicProxy<'a>,
+    time: GattCharacteristicProxy<'a>,
+    auth: GattCharacteristicProxy<'a>
 }
 
 #[derive(Debug)]
@@ -57,10 +57,11 @@ impl Error for BandError {}
 
 type Result<T> = std::result::Result<T, BandError>;
 
-pub struct MiBand {
-    device: Device,
+pub struct MiBand<'a> {
+    session: BluezSession<'a>,
+    device: DeviceProxy<'a>,
     pub authenticated: bool,
-    chars: Option<BandChars>
+    chars: Option<BandChars<'a>>
 }
 
 #[derive(Debug)]
@@ -96,32 +97,62 @@ fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
     }
 }
 
-/*// helper functions for getting all services/chars
-async fn get_all_services(device: &Device) -> Result<HashMap<Uuid, Service>> {
-    let mut map = HashMap::new();
-    for service in device.services().await? {
-        let uuid = service.uuid().await?;
-        map.insert(uuid, service);
-    }
-    Ok(map)
-}
-
-async fn get_all_chars(service: &Service) -> Result<HashMap<Uuid, Characteristic>> {
-    let mut map = HashMap::new();
-    for characteristic in service.characteristics().await? {
-        let uuid = characteristic.uuid().await?;
-        map.insert(uuid, characteristic);
-    }
-    Ok(map)
-}*/
-
-impl MiBand {
-    pub fn new(device: Device) -> Self {
-        Self {
+impl<'a> MiBand<'a> {
+    pub async fn from_discovered_device(session: BluezSession<'a>, device: &DiscoveredDevice) -> Result<Self> {
+        let device = session.proxy_from_discovered_device(device).await?;
+        Ok(Self {
             device,
+            session,
             authenticated: false,
             chars: None
+        })
+    }
+
+    pub async fn initialize(&mut self) -> Result<()> {
+        // first connect if needed
+        let was_connected = self.is_connected().await;
+        if !was_connected {
+            self.device.connect().await?;
         }
+
+        // if we weren't connected of if we don't have the chars, fetch them
+        if !was_connected || self.chars.is_none() {
+            self.fetch_chars().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn is_connected(&self) -> bool {
+        self.device.connected().await.unwrap_or(false)
+    }
+
+    /// iterate through all the services and characteristics in order to find the ones we need
+    /// Note: device must be connected here
+    async fn fetch_chars(&mut self) -> Result<()> {
+        // get the services
+        let services = self.session.get_device_characteristics(self.device.0.path());
+
+        match (services.get(&SERVICE_BAND_0), services.get(&SERVICE_BAND_1), services.get(&ServiceId::DeviceInformation.into())) {
+            (Some(band_0), Some(band_1), Some(device_info)) => {
+                // get the characteristics from their respective services
+                match (band_0.remove(&CHAR_BATTERY), band_0.remove(&CHAR_STEPS), band_0.remove(&CharId::CurrentTime.into()), device_info.remove(&CharId::SoftwareRevisionString.into()), band_1.remove(&CHAR_AUTH)) {
+                    (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth)) => {
+                        let chars = BandChars {
+                            battery, steps, time, firm_rev, auth
+                        };
+
+                        self.chars = Some(chars);
+
+                        return Ok(());
+                    },
+                    _ => {}
+                }
+            },
+            _ => {}
+        }
+
+        return Err(BandError::MissingServicesOrChars);
     }
 
     /*pub async fn is_connected(&self) -> bool {
@@ -318,7 +349,7 @@ impl MiBand {
             select! {
                 event = stream.next() => {
                     match event {
-                        Some(DeviceEvent::DeviceAdded(Device { address, path, services })) => {
+                        Some(DeviceEvent::DeviceAdded(DiscoveredDevice { address, path, services })) => {
                              // add each new device to the device map as long as it contains our service
                             // we need to check for the service here because the DiscoveryFilter isn't reliable
                             if services.contains(SERVICE_BAND_0) {
