@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="MiBand4Window" parent="GtkApplicationWindow">
+    <property name="title">Mi Band 4</property>
+    <child>
+      <object class="GtkBox" id="main_box">
+        <property name="orientation">GTK_ORIENTATION_VERTICAL</property>
+        <property name="margin-top">16</property>
+        <property name="margin-start">16</property>
+        <property name="margin-end">16</property>
+        <child>
+          <object class="GtkButton" id="btn_start_scan">
+            <property name="label">Start scan</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

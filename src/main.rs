@@ -2,12 +2,14 @@ use std::{env, time::Duration};
 
 use band::MiBand;
 use bluez::BluezSession;
-use gtk::{glib::{spawn_future_local, ExitCode}, prelude::*, Application, ApplicationWindow, Box as GBox, Button, HeaderBar, Label, Orientation};
+use gtk::{gio::resources_register_include, glib::{spawn_future_local, ExitCode}, prelude::*, Application, ApplicationWindow, Box as GBox, Button, HeaderBar, Label, Orientation};
+use ui::window::MiBandWindow;
 use utils::decode_hex;
 
 mod band;
 mod utils;
 mod bluez;
+mod ui;
 
 /*#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -37,10 +39,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }*/
 
-const APP_ID: &'static str = "com.github.grimsteel.miband4-gtk";
+const APP_ID: &'static str = "me.grimsteel.miband4-gtk";
 
 
 fn main() -> ExitCode {
+    resources_register_include!("resources.gresource").expect("failed to register resources");
+    
     let app = Application::builder().application_id(APP_ID).build();
     // connect a handler to the activate signal
     app.connect_activate(build_ui);
@@ -48,50 +52,10 @@ fn main() -> ExitCode {
 }
 
 fn build_ui(app: &Application) {
-    let auth_key = env::var("BAND_AUTH_KEY").ok().and_then(|s| decode_hex(&s)).unwrap();
-    
-    let button = Button::builder()
-        .label("Start scan")
-        .build();
-
-    button.connect_clicked(|b| {
-        b.set_label("Scanning...");
-        b.set_sensitive(false);
-    });
-
-    let text_unpowered = Label::builder()
-        .label("Bluetooth is off")
-        .build();
-
-    let g_box = GBox::builder()
-        .orientation(Orientation::Vertical)
-        .margin_bottom(16)
-        .margin_top(16)
-        .margin_start(16)
-        .margin_end(16)
-        .build();
-
-    g_box.append(&button);
-    g_box.append(&text_unpowered);
-
-    let title = Label::builder()
-        .label("Mi Band 4")
-        .build();
-
-    let titlebar = HeaderBar::builder()
-        .title_widget(&title)
-        .build();
-    
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title("Mi Band 4")
-        .child(&g_box)
-        .titlebar(&titlebar)
-        .build();
-    
+    let window = MiBandWindow::new(app);
     window.present();
 
-    spawn_future_local(async move {
+    /*spawn_future_local(async move {
         if let Ok(session) = BluezSession::new().await {
             let powered = session.adapter.powered().await.unwrap_or(false);
             button.set_visible(powered);
@@ -107,5 +71,5 @@ fn build_ui(app: &Application) {
                 }
             };
         };
-    });
+    });*/
 }
