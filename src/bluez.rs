@@ -1,7 +1,7 @@
-use std::{collections::{HashMap, HashSet}, os::{fd::{AsRawFd, FromRawFd}, unix::net}};
+use std::{collections::{HashMap, HashSet}, os::fd::OwnedFd};
 
 use async_net::unix::UnixStream;
-use zbus::{fdo::{InterfacesAdded, ObjectManagerProxy}, names::OwnedInterfaceName, proxy, zvariant::{DeserializeDict, ObjectPath, OwnedFd, OwnedObjectPath, OwnedValue, SerializeDict, Type}, Connection};
+use zbus::{fdo::{InterfacesAdded, ObjectManagerProxy}, names::OwnedInterfaceName, proxy, zvariant::{DeserializeDict, ObjectPath, OwnedFd as ZOwnedFd, OwnedObjectPath, OwnedValue, SerializeDict, Type}, Connection};
 
 use futures::stream::select;
 
@@ -79,8 +79,8 @@ trait GattCharacteristic {
     fn read_value(&self, options: &ReadOptions) -> zbus::Result<Vec<u8>>;
     fn write_value(&self, value: &[u8], options: &WriteOptions) -> zbus::Result<()>;
 
-    fn acquire_write(&self, options: &BlankOptions) -> zbus::Result<(OwnedFd, u16)>;
-    fn acquire_notify(&self, options: &BlankOptions) -> zbus::Result<(OwnedFd, u16)>;
+    fn acquire_write(&self, options: &BlankOptions) -> zbus::Result<(ZOwnedFd, u16)>;
+    fn acquire_notify(&self, options: &BlankOptions) -> zbus::Result<(ZOwnedFd, u16)>;
     
     #[zbus(property, name = "UUID")]
     fn uuid(&self) -> zbus::Result<String>;
@@ -95,9 +95,18 @@ impl<'a> GattCharacteristicProxy<'a> {
 
     pub async fn acquire_write_stream(&self) -> zbus::Result<(UnixStream, u16)> {
         let (fd, mtu) = self.acquire_write(&BlankOptions {}).await?;
-        let stream = unsafe { net::UnixStream::from_raw_fd(fd.as_raw_fd()) };
-        stream.set_nonblocking(true);
-        let stream: UnixStream = stream.try_into().unwrap();
+        // convert into std ownedfd
+        let fd: OwnedFd = fd.into();
+        // async unix stream
+        let stream = UnixStream::try_from(fd)?;
+
+        Ok((stream, mtu))
+    }
+
+    pub async fn acquire_notify_stream(&self) -> zbus::Result<(UnixStream, u16)> {
+        let (fd, mtu) = self.acquire_notify(&BlankOptions {}).await?;
+        let fd: OwnedFd = fd.into();
+        let stream = UnixStream::try_from(fd)?;
 
         Ok((stream, mtu))
     }

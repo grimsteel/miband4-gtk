@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Display, io, time::Duration};
 
 use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use futures::{pin_mut, select, FutureExt, StreamExt};
+use futures::{pin_mut, select, AsyncReadExt, AsyncWriteExt, FutureExt, StreamExt};
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, utils::encrypt_value};
@@ -183,26 +183,27 @@ impl<'a> MiBand<'a> {
         if let Some(BandChars { auth, ..}) = &self.chars {
 
             // note: it's important that we start the notify session before writing
-            let notify = auth.notify_io().await?;
-            let write = auth.write_io().await?;
+            let (mut notify, notify_mtu) = auth.acquire_notify_stream().await?;
+            let (mut write, _) = auth.acquire_write_stream().await?;
 
             // signal the band to start auth
-            write.send(&[0x02, 0x00]).await?;
+            write.write(&[0x02, 0x00]).await?;
+            let mut buf = Vec::with_capacity(notify_mtu as usize);
             loop {
-                let value = notify.recv().await?;
-                if value[0] == 0x10 && value.len() >= 3 {
-                    match &value[1..3] {
+                let len = notify.read(&mut buf).await?;
+                if buf[0] == 0x10 && len >= 3 {
+                    match &buf[1..3] {
                         &[0x01, 0x01] => {
                             // signal to start again
-                            write.send(&[0x02, 0x00]).await?;
+                            write.write(&[0x02, 0x00]).await?;
                         },
                         &[0x02, 0x01] => {
                             // the band has sent us a 16 byte value to encrypt
-                            let value = &value[3..19];
+                            let value = &buf[3..19];
                             if let Some(encrypted) = encrypt_value(&auth_key, value) {
                                 // 0x03 0x00 <first 16 bytes of encrypted value>
                                 let response = [&[0x03, 0x00], &encrypted[0..16]].concat();
-                                write.send(&response).await?;
+                                write.write(&response).await?;
                             }
                         },
                         &[0x03, 0x01] => {
@@ -215,8 +216,8 @@ impl<'a> MiBand<'a> {
                             return Err(BandError::InvalidAuthKey);
                         },
                         
-                        value => {
-                            println!("unknown authentication response {value:?}");
+                        buf => {
+                            println!("unknown authentication response {buf:?}");
                         }
                     }
                 }
@@ -326,6 +327,7 @@ impl<'a> MiBand<'a> {
                             // we need to check for the service here because the DiscoveryFilter isn't reliable
                             if device.services.contains(SERVICE_BAND_0) {
                                 device_map.insert(device.path.clone(), device);
+                                break;
                             }
                         },
                         Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {

@@ -1,11 +1,9 @@
-use std::{env, error::Error, str::FromStr, time::Duration};
+use std::{env, time::Duration};
 
 use band::MiBand;
-use bluez::{AdapterProxy, BluezSession};
-use chrono::Local;
+use bluez::BluezSession;
 use gtk::{glib::{spawn_future_local, ExitCode}, prelude::*, Application, ApplicationWindow, Box as GBox, Button, HeaderBar, Label, Orientation};
 use utils::decode_hex;
-use zbus::Connection;
 
 mod band;
 mod utils;
@@ -13,7 +11,6 @@ mod bluez;
 
 /*#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let auth_key = env::var("BAND_AUTH_KEY").ok().and_then(|s| decode_hex(&s)).unwrap();
     
     let session = Session::new().await?;
     // get the adapter
@@ -50,7 +47,9 @@ fn main() -> ExitCode {
     app.run()
 }
 
-fn build_ui(app: &Application) {    
+fn build_ui(app: &Application) {
+    let auth_key = env::var("BAND_AUTH_KEY").ok().and_then(|s| decode_hex(&s)).unwrap();
+    
     let button = Button::builder()
         .label("Start scan")
         .build();
@@ -103,7 +102,7 @@ fn build_ui(app: &Application) {
                 println!("found device {band:?}");
                 if let Ok(mut band) = MiBand::from_discovered_device(session.clone(), band).await {
                     println!("{:?}", band.initialize().await);
-                    println!("{:?} {:?}", band.get_band_time().await, band.get_battery().await);
+                    println!("{:?}", band.authenticate(&auth_key).await);
                     
                 }
             };
