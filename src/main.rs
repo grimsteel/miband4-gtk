@@ -100,10 +100,11 @@ fn build_ui(app: &Application) {
 
             if let Ok(all_bands) = MiBand::discover(session.clone(), Duration::from_secs(5)).await {
                 let band = all_bands.first().unwrap();
+                println!("found device {band:?}");
                 if let Ok(mut band) = MiBand::from_discovered_device(session.clone(), band).await {
-                    { let result = band.initialize().await;
-                      println!("{:?}", result); }
-                    println!("{:?}", band);
+                    println!("{:?}", band.initialize().await);
+                    println!("{:?} {:?}", band.get_band_time().await, band.get_battery().await);
+                    
                 }
             };
         };

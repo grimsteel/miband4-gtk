@@ -103,7 +103,7 @@ fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
 }
 
 impl<'a> MiBand<'a> {
-    pub async fn from_discovered_device(session: BluezSession<'a>, device: &DiscoveredDevice) -> Result<Self> {
+    pub async fn from_discovered_device(session: BluezSession<'a>, device: &'a DiscoveredDevice) -> Result<Self> {
         let device = session.proxy_from_discovered_device(device).await?;
         Ok(Self {
             device,
@@ -122,7 +122,8 @@ impl<'a> MiBand<'a> {
 
         // if we weren't connected of if we don't have the chars, fetch them
         if !was_connected || self.chars.is_none() {
-            self.fetch_chars().await?;
+            let chars = self.fetch_chars().await?;
+            self.chars = Some(chars);
         }
 
         Ok(())
@@ -134,10 +135,19 @@ impl<'a> MiBand<'a> {
 
     /// iterate through all the services and characteristics in order to find the ones we need
     /// Note: device must be connected here
-    async fn fetch_chars<'b>(&'b mut self) -> Result<()> {
+    async fn fetch_chars<'b>(&self) -> Result<BandChars<'b>> {
+        let services_resolved = self.device.services_resolved().await.unwrap_or(false);
+
+        if !services_resolved {
+            // wait for services to resolve
+            let mut services_resolved_stream = self.device.receive_services_resolved_changed().await;
+            while let Some(value) = services_resolved_stream.next().await {
+                if let Ok(true) = value.get().await { break; }
+            }
+        };
+        
         // get the services
         let mut services = self.session.get_device_characteristics(self.device.path()).await?;
-
         match (
             services.remove(SERVICE_BAND_0),
             services.remove(SERVICE_BAND_1),
@@ -157,9 +167,7 @@ impl<'a> MiBand<'a> {
                             battery, steps, time, firm_rev, auth
                         };
 
-                        self.chars = Some(chars);
-
-                        return Ok(());
+                        return Ok(chars);
                     },
                     _ => {}
                 }

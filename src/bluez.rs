@@ -55,10 +55,12 @@ trait Device {
     fn address(&self) -> zbus::Result<String>;
     #[zbus(property)]
     fn connected(&self) -> zbus::Result<bool>;
+    #[zbus(property)]
+    fn services_resolved(&self) -> zbus::Result<bool>;
 }
 
 impl<'a> DeviceProxy<'a> {
-    pub fn path(&self) -> &ObjectPath { self.0.path() }
+    pub fn path<'b>(&'b self) -> &'b ObjectPath { self.0.path() }
 }
 
 #[proxy(default_service = "org.bluez", interface = "org.bluez.GattService1", gen_blocking = false)]
@@ -157,7 +159,7 @@ impl<'a> BluezSession<'a> {
     }
 
     /// stream device added/removed events
-    pub async fn stream_device_events(&'a self) -> zbus::Result<impl futures_util::Stream<Item = DiscoveredDeviceEvent> + 'a> {
+    pub async fn stream_device_events<'b>(&'b self) -> zbus::Result<impl futures_util::Stream<Item = DiscoveredDeviceEvent> + 'b> {
         let added_objects = self.object_manager.receive_interfaces_added().await?;
         let removed_objects = self.object_manager.receive_interfaces_removed().await?;
 
@@ -188,7 +190,7 @@ impl<'a> BluezSession<'a> {
 
     /// Get all services/characteristics under a device
     /// Returns a map of service UUID to map of char UUID to char proxy
-    pub async fn get_device_characteristics<'b, 'c>(&'c self, device_path: &ObjectPath<'b>) -> zbus::Result<DeviceServiceChars<'c>> {
+    pub async fn get_device_characteristics<'b, 'c>(&self, device_path: &ObjectPath<'b>) -> zbus::Result<DeviceServiceChars<'c>> {
         // map of service UUID to object path
         let mut services = HashMap::<String, OwnedObjectPath>::new();
         // map of service object path to map of characteristic uuid to characteristic path
@@ -229,7 +231,7 @@ impl<'a> BluezSession<'a> {
         }).collect())
     }
 
-    pub async fn proxy_from_discovered_device<'b>(&self, device: &DiscoveredDevice) -> zbus::Result<DeviceProxy<'b>> {
+    pub async fn proxy_from_discovered_device<'b, 'c>(&'c self, device: &'b DiscoveredDevice) -> zbus::Result<DeviceProxy<'b>> {
         DeviceProxy::builder(&self.connection).path(device.path.to_owned()).expect("is a valid path").build().await
     }
 }
