@@ -17,6 +17,22 @@ pub struct DiscoveryFilter {
     pub transport: String
 }
 
+#[derive(DeserializeDict, SerializeDict, Type, Default)]
+#[zvariant(signature = "dict")]
+pub struct ReadOptions {
+    pub offset: u16
+}
+
+#[derive(DeserializeDict, SerializeDict, Type)]
+#[zvariant(signature = "dict")]
+pub struct WriteOptions {
+    pub offset: u16,
+    /// either "command" (w/o response), "request" (w/ response), or "reliable"
+    #[zvariant(rename = "type")]
+    pub write_type: String,
+    pub prepare_authorize: bool
+}
+
 // #region Bluez interfaces
 
 #[proxy(default_service = "org.bluez", default_path = "/org/bluez/hci0", interface = "org.bluez.Adapter1", gen_blocking = false)]
@@ -41,6 +57,10 @@ trait Device {
     fn connected(&self) -> zbus::Result<bool>;
 }
 
+impl<'a> DeviceProxy<'a> {
+    pub fn path(&self) -> &ObjectPath { self.0.path() }
+}
+
 #[proxy(default_service = "org.bluez", interface = "org.bluez.GattService1", gen_blocking = false)]
 trait GattService {
     #[zbus(property, name = "UUID")]
@@ -49,10 +69,19 @@ trait GattService {
 
 #[proxy(default_service = "org.bluez", interface = "org.bluez.GattCharacteristic1", gen_blocking = false)]
 trait GattCharacteristic {
+    fn read_value(&self, options: &ReadOptions) -> zbus::Result<Vec<u8>>;
+    fn write_value(&self, value: &[u8], options: &WriteOptions) -> zbus::Result<()>;
+    
     #[zbus(property, name = "UUID")]
     fn uuid(&self) -> zbus::Result<String>;
     #[zbus(property)]
     fn service(&self) -> zbus::Result<ObjectPath>;
+}
+
+impl<'a> GattCharacteristicProxy<'a> {
+    pub async fn read_value_default(&self) -> zbus::Result<Vec<u8>> {
+        self.read_value(&ReadOptions::default()).await
+    }
 }
 
 // #endregion
@@ -75,7 +104,7 @@ pub struct DiscoveredDevice {
 }
 
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BluezSession<'a> {
     connection: Connection,
     pub adapter: AdapterProxy<'a>,
@@ -100,7 +129,7 @@ impl<'a> BluezSession<'a> {
         let adapter_path = self.adapter.0.path().as_str();
         path.strip_prefix(adapter_path)
             // the first character will be a '/'
-            .map(|relative_path| !&relative_path[1..].contains('/'))
+            .map(|relative_path| relative_path.len() >= 1 && !&relative_path[1..].contains('/'))
             .unwrap_or(false)
     }
 
@@ -159,7 +188,7 @@ impl<'a> BluezSession<'a> {
 
     /// Get all services/characteristics under a device
     /// Returns a map of service UUID to map of char UUID to char proxy
-    pub async fn get_device_characteristics<'b, 'c>(&'c self, device_path: ObjectPath<'b>) -> zbus::Result<DeviceServiceChars<'c>> {
+    pub async fn get_device_characteristics<'b, 'c>(&'c self, device_path: &ObjectPath<'b>) -> zbus::Result<DeviceServiceChars<'c>> {
         // map of service UUID to object path
         let mut services = HashMap::<String, OwnedObjectPath>::new();
         // map of service object path to map of characteristic uuid to characteristic path

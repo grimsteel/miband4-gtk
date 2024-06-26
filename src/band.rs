@@ -5,14 +5,18 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{pin_mut, select, FutureExt, StreamExt};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{bluez::{AdapterProxy, BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
+const SERVICE_DEVICE_INFO: &'static str = "0000180a-0000-1000-8000-00805f9b34fb";
 const CHAR_BATTERY: &'static str = "00000006-0000-3512-2118-0009af100700";
 const CHAR_STEPS: &'static str = "00000007-0000-3512-2118-0009af100700";
 const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
+const CHAR_SOFT_REV: &'static str = "00002a28-0000-1000-8000-00805f9b34fb";
+const CHAR_TIME: &'static str = "00002a2b-0000-1000-8000-00805f9b34fb";
 
+#[derive(Debug)]
 struct BandChars<'a> {
     battery: GattCharacteristicProxy<'a>,
     steps: GattCharacteristicProxy<'a>,
@@ -57,6 +61,7 @@ impl Error for BandError {}
 
 type Result<T> = std::result::Result<T, BandError>;
 
+#[derive(Debug)]
 pub struct MiBand<'a> {
     session: BluezSession<'a>,
     device: DeviceProxy<'a>,
@@ -108,7 +113,7 @@ impl<'a> MiBand<'a> {
         })
     }
 
-    pub async fn initialize(&mut self) -> Result<()> {
+    pub async fn initialize<'b>(&'b mut self) -> Result<()> {
         // first connect if needed
         let was_connected = self.is_connected().await;
         if !was_connected {
@@ -129,14 +134,24 @@ impl<'a> MiBand<'a> {
 
     /// iterate through all the services and characteristics in order to find the ones we need
     /// Note: device must be connected here
-    async fn fetch_chars(&mut self) -> Result<()> {
+    async fn fetch_chars<'b>(&'b mut self) -> Result<()> {
         // get the services
-        let services = self.session.get_device_characteristics(self.device.0.path());
+        let mut services = self.session.get_device_characteristics(self.device.path()).await?;
 
-        match (services.get(&SERVICE_BAND_0), services.get(&SERVICE_BAND_1), services.get(&ServiceId::DeviceInformation.into())) {
-            (Some(band_0), Some(band_1), Some(device_info)) => {
+        match (
+            services.remove(SERVICE_BAND_0),
+            services.remove(SERVICE_BAND_1),
+            services.remove(SERVICE_DEVICE_INFO)
+        ) {
+            (Some(mut band_0), Some(mut band_1), Some(mut device_info)) => {
                 // get the characteristics from their respective services
-                match (band_0.remove(&CHAR_BATTERY), band_0.remove(&CHAR_STEPS), band_0.remove(&CharId::CurrentTime.into()), device_info.remove(&CharId::SoftwareRevisionString.into()), band_1.remove(&CHAR_AUTH)) {
+                match (
+                    band_0.remove(CHAR_BATTERY),
+                    band_0.remove(CHAR_STEPS),
+                    band_0.remove(CHAR_TIME),
+                    device_info.remove(CHAR_SOFT_REV),
+                    band_1.remove(CHAR_AUTH)
+                ) {
                     (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth)) => {
                         let chars = BandChars {
                             battery, steps, time, firm_rev, auth
@@ -155,56 +170,7 @@ impl<'a> MiBand<'a> {
         return Err(BandError::MissingServicesOrChars);
     }
 
-    /*pub async fn is_connected(&self) -> bool {
-        self.device.is_connected().await.unwrap_or(false)
-    }
-
-    /// connect to the band and fetch all GATT characteristics
-    pub async fn initialize(&mut self) -> Result<()> {
-        // first connect if needed
-        let was_connected = self.is_connected().await;
-        if !was_connected {
-            self.device.connect().await?;
-        }
-
-        // if we weren't connected of if we don't have the chars, fetch them
-        if !was_connected || self.chars.is_none() {
-            self.fetch_chars().await?;
-        }
-
-        Ok(())
-    }
-
-    /// iterate through all the services and characteristics in order to find the ones we need
-    /// Note: device must be connected here
-    async fn fetch_chars(&mut self) -> Result<()> {
-        // get the services
-        let services = get_all_services(&self.device).await?;
-
-        match (services.get(&SERVICE_BAND_0), services.get(&SERVICE_BAND_1), services.get(&ServiceId::DeviceInformation.into())) {
-            (Some(band_0), Some(band_1), Some(device_info)) => {
-                let mut band_0 = get_all_chars(band_0).await?;
-                let mut band_1 = get_all_chars(band_1).await?;
-                let mut device_info = get_all_chars(device_info).await?;
-                // get the characteristics from their respective services
-                match (band_0.remove(&CHAR_BATTERY), band_0.remove(&CHAR_STEPS), band_0.remove(&CharId::CurrentTime.into()), device_info.remove(&CharId::SoftwareRevisionString.into()), band_1.remove(&CHAR_AUTH)) {
-                    (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth)) => {
-                        let chars = BandChars {
-                            battery, steps, time, firm_rev, auth
-                        };
-
-                        self.chars = Some(chars);
-
-                        return Ok(());
-                    },
-                    _ => {}
-                }
-            },
-            _ => {}
-        }
-
-        return Err(BandError::MissingServicesOrChars);
-    }
+    /*
 
     /// Authenticate with the band
     pub async fn authenticate(&mut self, auth_key: &[u8]) -> Result<()> {
@@ -250,12 +216,12 @@ impl<'a> MiBand<'a> {
                 }
             }
         } else { Err(BandError::NotInitialized) }
-    }
+    }*/
 
     /// get the battery level and status
     pub async fn get_battery(&self) -> Result<BatteryStatus> {
         if let Some(BandChars { battery, .. }) = &self.chars {
-            let value = battery.read().await?;
+            let value = battery.read_value_default().await?;
             let battery_level = value[1];
             let charging = value[2] != 0;
 
@@ -274,7 +240,7 @@ impl<'a> MiBand<'a> {
     /// get the current time on the band
     pub async fn get_band_time(&self) -> Result<DateTime<Local>> {
         if let Some(BandChars { time, .. }) = &self.chars {
-            let value = time.read().await?;
+            let value = time.read_value_default().await?;
             parse_time(&value).ok_or(BandError::InvalidTime)
         } else { Err(BandError::NotInitialized) }
     }
@@ -288,12 +254,12 @@ impl<'a> MiBand<'a> {
             let day_of_week = new_time.weekday().num_days_from_sunday() as u8;
             // year (two bytes), month, day, hour, minute, second, day of week, 3 zeros? (could be timezone)
             let value = vec![(year & 0xff) as u8, (year >> 8) as u8, new_time.month() as u8, new_time.day() as u8, new_time.hour() as u8, new_time.minute() as u8, new_time.second() as u8, day_of_week, 0, 0, 0];
-            let write_req = CharacteristicWriteRequest {
-                op_type: WriteOp::Request,
+            let write_options = WriteOptions {
+                write_type: "request".into(),
                 prepare_authorize: true,
-                ..Default::default()
+                offset: 0
             };
-            time.write_ext(&value, &write_req).await?;
+            time.write_value(&value, &write_options).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
     }
@@ -301,7 +267,7 @@ impl<'a> MiBand<'a> {
     /// get the current step count, meters walked, and calories burned
     pub async fn get_current_activity(&self) -> Result<CurrentActivity> {
         if let Some(BandChars { steps, .. }) = &self.chars {
-            let value = steps.read().await?;
+            let value = steps.read_value_default().await?;
             let steps = (value[1] as u16) | ((value[2] as u16) << 8);
             let meters = (value[5] as u16) | ((value[6] as u16) << 8);
             let calories = (value[9] as u16) | ((value[10] as u16) << 8);
@@ -314,20 +280,20 @@ impl<'a> MiBand<'a> {
     // firmware revision (software revision string)
     pub async fn get_firmware_revision(&self) -> Result<String> {
         if let Some(BandChars { firm_rev, .. }) = &self.chars {
-            let value = firm_rev.read().await?;
+            let value = firm_rev.read_value_default().await?;
             String::from_utf8(value).map_err(|_e| BandError::Utf8Error)
         } else { Err(BandError::NotInitialized) }
-    }*/
+    }
 
     /// discover valid mi bands in the area
-    pub async fn discover<'a>(session: BluezSession<'a>, timeout: Duration)  -> Result<HashMap<OwnedObjectPath, String>> {
+    pub async fn discover<'b>(session: BluezSession<'b>, timeout: Duration)  -> Result<Vec<DiscoveredDevice>> {
 
         let existing_devices = session.get_devices().await?;
-        let mut device_map: HashMap<OwnedObjectPath, String> = existing_devices.into_iter()
+        let mut device_map: HashMap<OwnedObjectPath, DiscoveredDevice> = existing_devices.into_iter()
             .filter_map(|device| {
                 if device.services.contains(SERVICE_BAND_0) {
                     // this is a mi band
-                    Some((device.path, device.address))
+                    Some((device.path.clone(), device))
                 } else { None }
             })
             .collect();
@@ -349,14 +315,14 @@ impl<'a> MiBand<'a> {
             select! {
                 event = stream.next() => {
                     match event {
-                        Some(DeviceEvent::DeviceAdded(DiscoveredDevice { address, path, services })) => {
+                        Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
                              // add each new device to the device map as long as it contains our service
                             // we need to check for the service here because the DiscoveryFilter isn't reliable
-                            if services.contains(SERVICE_BAND_0) {
-                                device_map.insert(path, address);
+                            if device.services.contains(SERVICE_BAND_0) {
+                                device_map.insert(device.path.clone(), device);
                             }
                         },
-                        Some(DeviceEvent::DeviceRemoved(path)) => {
+                        Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {
                             device_map.remove(&path);
                         },
                         _ => {}
@@ -367,6 +333,6 @@ impl<'a> MiBand<'a> {
         }
         session.adapter.stop_discovery().await?;
         
-        Ok(device_map)
+        Ok(device_map.into_values().collect())
     }
 }
