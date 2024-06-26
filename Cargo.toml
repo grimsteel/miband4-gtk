@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 aes = "0.8.4"
 async-io = "2.3.3"
+async-net = "2.0.0"
 cbc = "0.1.2"
 chrono = "0.4.38"
 futures = "0.3.30"

@@ -178,8 +178,6 @@ impl<'a> MiBand<'a> {
         return Err(BandError::MissingServicesOrChars);
     }
 
-    /*
-
     /// Authenticate with the band
     pub async fn authenticate(&mut self, auth_key: &[u8]) -> Result<()> {
         if let Some(BandChars { auth, ..}) = &self.chars {
@@ -224,7 +222,7 @@ impl<'a> MiBand<'a> {
                 }
             }
         } else { Err(BandError::NotInitialized) }
-    }*/
+    }
 
     /// get the battery level and status
     pub async fn get_battery(&self) -> Result<BatteryStatus> {

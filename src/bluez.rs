@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, os::{fd::{AsRawFd, FromRawFd}, unix::net}};
 
-use zbus::{fdo::{ObjectManagerProxy, InterfacesAdded}, names::OwnedInterfaceName, proxy, zvariant::{DeserializeDict, ObjectPath, OwnedObjectPath, OwnedValue, SerializeDict, Type}, Connection};
+use async_net::unix::UnixStream;
+use zbus::{fdo::{InterfacesAdded, ObjectManagerProxy}, names::OwnedInterfaceName, proxy, zvariant::{DeserializeDict, ObjectPath, OwnedFd, OwnedObjectPath, OwnedValue, SerializeDict, Type}, Connection};
 
 use futures::stream::select;
 
@@ -32,6 +33,10 @@ pub struct WriteOptions {
     pub write_type: String,
     pub prepare_authorize: bool
 }
+
+#[derive(DeserializeDict, SerializeDict, Type)]
+#[zvariant(signature = "dict")]
+pub struct BlankOptions {}
 
 // #region Bluez interfaces
 
@@ -73,6 +78,9 @@ trait GattService {
 trait GattCharacteristic {
     fn read_value(&self, options: &ReadOptions) -> zbus::Result<Vec<u8>>;
     fn write_value(&self, value: &[u8], options: &WriteOptions) -> zbus::Result<()>;
+
+    fn acquire_write(&self, options: &BlankOptions) -> zbus::Result<(OwnedFd, u16)>;
+    fn acquire_notify(&self, options: &BlankOptions) -> zbus::Result<(OwnedFd, u16)>;
     
     #[zbus(property, name = "UUID")]
     fn uuid(&self) -> zbus::Result<String>;
@@ -83,6 +91,15 @@ trait GattCharacteristic {
 impl<'a> GattCharacteristicProxy<'a> {
     pub async fn read_value_default(&self) -> zbus::Result<Vec<u8>> {
         self.read_value(&ReadOptions::default()).await
+    }
+
+    pub async fn acquire_write_stream(&self) -> zbus::Result<(UnixStream, u16)> {
+        let (fd, mtu) = self.acquire_write(&BlankOptions {}).await?;
+        let stream = unsafe { net::UnixStream::from_raw_fd(fd.as_raw_fd()) };
+        stream.set_nonblocking(true);
+        let stream: UnixStream = stream.try_into().unwrap();
+
+        Ok((stream, mtu))
     }
 }
 
