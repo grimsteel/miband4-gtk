@@ -59,7 +59,7 @@ impl Display for BandError {
 
 impl Error for BandError {}
 
-type Result<T> = std::result::Result<T, BandError>;
+pub type Result<T> = std::result::Result<T, BandError>;
 
 #[derive(Debug)]
 pub struct MiBand<'a> {
@@ -290,6 +290,11 @@ impl<'a> MiBand<'a> {
             let value = firm_rev.read_value_default().await?;
             String::from_utf8(value).map_err(|_e| BandError::Utf8Error)
         } else { Err(BandError::NotInitialized) }
+    }
+
+    pub async fn get_known_bands<'b>(session: BluezSession<'b>) -> Result<Vec<DiscoveredDevice>> {
+        let existing_devices = session.get_devices().await?;
+        Ok(existing_devices.into_iter().filter(|device| device.services.contains(SERVICE_BAND_0)).collect())
     }
 
     /// discover valid mi bands in the area

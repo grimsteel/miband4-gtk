@@ -2,15 +2,67 @@
 <interface>
   <template class="MiBand4Window" parent="GtkApplicationWindow">
     <property name="title">Mi Band 4</property>
+    <child type="titlebar">
+      <object class="GtkHeaderBar">
+        <property name="title-widget">
+          <object class="GtkLabel">
+            <property name="label">Mi Band 4</property>
+          </object>
+        </property>
+      </object>
+    </child>
     <child>
-      <object class="GtkBox" id="main_box">
-        <property name="orientation">GTK_ORIENTATION_VERTICAL</property>
+      <object class="GtkStack" id="main_stack">
         <property name="margin-top">16</property>
         <property name="margin-start">16</property>
         <property name="margin-end">16</property>
         <child>
-          <object class="GtkButton" id="btn_start_scan">
-            <property name="label">Start scan</property>
+          <object class="GtkStackPage">
+            <property name="name">bluetooth-off</property>
+            <property name="child">
+              <object class="GtkLabel">
+                <property name="label">Bluetooth is off</property>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkStackPage">
+            <property name="name">device-list</property>
+            <property name="child">
+              <object class="GtkScrolledWindow">
+                <property name="min-content-width">360</property>
+                <property name="hscrollbar-policy">GTK_POLICY_NEVER</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">GTK_ORIENTATION_VERTICAL</property>
+                    <child>
+                      <object class="GtkButton" id="btn_start_scan">
+                        <property name="label">Start scan</property>
+                        <property name="margin-bottom">16</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Found devices:</property>
+                        <property name="margin-bottom">16</property>
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <attributes>
+                          <attribute name="weight" value="PANGO_WEIGHT_BOLD"/>
+                        </attributes>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBox" id="list_devices">
+
+
+                        
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
           </object>
         </child>
       </object>
