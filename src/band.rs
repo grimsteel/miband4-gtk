@@ -188,10 +188,10 @@ impl<'a> MiBand<'a> {
 
             // signal the band to start auth
             write.write(&[0x02, 0x00]).await?;
-            let mut buf = Vec::with_capacity(notify_mtu as usize);
+            let mut buf = vec![0; notify_mtu as usize];
             loop {
                 let len = notify.read(&mut buf).await?;
-                if buf[0] == 0x10 && len >= 3 {
+                if len >= 3 && buf[0] == 0x10 {
                     match &buf[1..3] {
                         &[0x01, 0x01] => {
                             // signal to start again
