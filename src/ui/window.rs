@@ -1,10 +1,12 @@
 use std::cell::RefCell;
 
 use gtk::{
-    gio::{ActionGroup, ActionMap}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListBox, Native, Root, ShortcutManager, Stack, Widget, Window
+    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 
 use crate::{band::{self, MiBand}, bluez::BluezSession};
+
+use super::device_row::{DeviceRow, DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -30,13 +32,40 @@ impl MiBandWindow {
         if session.adapter.powered().await? {
             self.set_page("device-list");
 
+
+            // initialize devices list
+            let model = ListStore::new::<DeviceRowObject>();
+
             // get currently known devices
             let devices = MiBand::get_known_bands(session.clone()).await?;
-            for device in devices.iter() {
-                let label = Label::new(Some(&device.address));
-                self.imp().list_devices.append(&label);
+            for device in devices.into_iter() {
+                model.append(&DeviceRowObject::new(device.address, device.connected, device.rssi.map(|r| r as i32)));
             }
+
+            self.imp().devices.replace(Some(model));
+            self.imp().list_devices.set_model(Some(&NoSelection::new(self.imp().devices.borrow().clone())));
         }
+
+        let device_list_factory = SignalListItemFactory::new();
+        device_list_factory.connect_setup(move |_, list_item| {
+            let row = DeviceRow::new();
+            list_item.downcast_ref::<ListItem>().expect("is a listitem").set_child(Some(&row));
+        });
+        device_list_factory.connect_bind(move |_, list_item| {
+            // bind the device row to the object
+            let list_item = list_item.downcast_ref::<ListItem>().expect("is a listitem");
+            let obj = list_item.item().and_downcast::<DeviceRowObject>().expect("is a device row object");
+            let row = list_item.child().and_downcast::<DeviceRow>().expect("is a device row");
+            row.bind(&obj);
+        });
+        device_list_factory.connect_bind(move |_, list_item| {
+            // call the unbind method on the row
+            let list_item = list_item.downcast_ref::<ListItem>().expect("is a listitem");
+            let row = list_item.child().and_downcast::<DeviceRow>().expect("is a device row");
+            row.unbind();
+        });
+
+        self.imp().list_devices.set_factory(Some(&device_list_factory));
         
         Ok(())
     }
@@ -50,7 +79,8 @@ pub struct MiBandWindowImpl {
     #[template_child]
     main_stack: TemplateChild<Stack>,
     #[template_child]
-    list_devices: TemplateChild<ListBox>,
+    list_devices: TemplateChild<ListView>,
+    devices: RefCell<Option<ListStore>>
 
     //bluez_session: RefCell<Option<BluezSession<'static>>>
 }

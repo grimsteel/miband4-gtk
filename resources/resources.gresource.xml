@@ -2,5 +2,7 @@
 <gresources>
   <gresource prefix="/me/grimsteel/miband4-gtk/">
     <file compressed="true" preprocess="xml-stripblanks">window.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">device_row.ui</file>
+    <file compressed="true">style.css</file>
   </gresource>
 </gresources>

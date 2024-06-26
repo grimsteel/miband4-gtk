@@ -128,7 +128,9 @@ pub enum DiscoveredDeviceEvent {
 pub struct DiscoveredDevice {
     pub path: OwnedObjectPath,
     pub address: String,
-    pub services: HashSet<String>
+    pub services: HashSet<String>,
+    pub rssi: Option<i16>,
+    pub connected: bool
 }
 
 
@@ -174,10 +176,15 @@ impl<'a> BluezSession<'a> {
                    let address: String = device.remove("Address")?.try_into().ok()?;
                    // convert to Vec, then collect into HashSet
                    let services = Vec::<_>::try_from(device.remove("UUIDs")?).ok()?.into_iter().collect();
+                   let connected: bool = device.remove("Connected")?.try_into().ok()?;
+                   // the rssi may not exist on the device hash map
+                   let rssi: Option<i16> = device.remove("RSSI").and_then(|v| v.try_into().ok());
                    Some(DiscoveredDevice {
                        path,
                        address,
-                       services
+                       services,
+                       rssi,
+                       connected
                    })
                } else { None }
             })
@@ -195,10 +202,14 @@ impl<'a> BluezSession<'a> {
                 let device = args.interfaces_and_properties.get("org.bluez.Device1")?;
                 let address: String = device.get("Address")?.try_into().ok()?;
                 let services = Vec::<_>::try_from(device.get("UUIDs")?.try_to_owned().unwrap()).ok()?.into_iter().collect();
+                let connected: bool = device.get("Connected")?.try_into().ok()?;
+                let rssi: Option<i16> = device.get("RSSI").and_then(|v| v.try_into().ok());
                 Some(DiscoveredDeviceEvent::DeviceAdded(DiscoveredDevice {
                     path: args.object_path.into(),
                     address,
-                    services
+                    services,
+                    connected,
+                    rssi
                 }))
             } else { None }
         });
