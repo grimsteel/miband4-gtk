@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Display, io, time::Duration};
 
 use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use futures::{pin_mut, select, AsyncReadExt, AsyncWriteExt, FutureExt, StreamExt};
+use futures::{pin_mut, select, AsyncReadExt, AsyncWriteExt, FutureExt, Stream, StreamExt};
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, utils::encrypt_value};
@@ -297,19 +297,7 @@ impl<'a> MiBand<'a> {
         Ok(existing_devices.into_iter().filter(|device| device.services.contains(SERVICE_BAND_0)).collect())
     }
 
-    /// discover valid mi bands in the area
-    pub async fn discover<'b>(session: BluezSession<'b>, timeout: Duration)  -> Result<Vec<DiscoveredDevice>> {
-
-        let existing_devices = session.get_devices().await?;
-        let mut device_map: HashMap<OwnedObjectPath, DiscoveredDevice> = existing_devices.into_iter()
-            .filter_map(|device| {
-                if device.services.contains(SERVICE_BAND_0) {
-                    // this is a mi band
-                    Some((device.path.clone(), device))
-                } else { None }
-            })
-            .collect();
-
+    pub async fn start_filtered_discovery<'b>(session: BluezSession<'b>) -> Result<()> {
         // filter to just the mi band service
         let filter = DiscoveryFilter {
             uuids: vec![SERVICE_BAND_0.into()],
@@ -320,32 +308,18 @@ impl<'a> MiBand<'a> {
         // start discovery
         session.adapter.set_discovery_filter(filter).await?;
         session.adapter.start_discovery().await?;
-        let stream = session.stream_device_events().await?.fuse();
-        pin_mut!(stream);
-        let mut timeout = FutureExt::fuse(Timer::after(timeout));
-        loop {
-            select! {
-                event = stream.next() => {
-                    match event {
-                        Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
-                             // add each new device to the device map as long as it contains our service
-                            // we need to check for the service here because the DiscoveryFilter isn't reliable
-                            if device.services.contains(SERVICE_BAND_0) {
-                                device_map.insert(device.path.clone(), device);
-                                break;
-                            }
-                        },
-                        Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {
-                            device_map.remove(&path);
-                        },
-                        _ => {}
-                    }
-                },
-                _ = timeout => { break; }
+        Ok(())
+    }
+
+    /// discover valid mi bands in the area
+    pub async fn stream_band_changes<'b>(session: &'b BluezSession<'b>)  -> Result<impl Stream<Item = DiscoveredDeviceEvent> + 'b> {
+        let stream = session.stream_device_events().await?;
+        Ok(stream.filter_map(move |item| async {
+            // make sure added devices are mi bands
+            if let DiscoveredDeviceEvent::DeviceAdded(device) = &item {
+                if !device.services.contains(SERVICE_BAND_0) { return None };
             }
-        }
-        session.adapter.stop_discovery().await?;
-        
-        Ok(device_map.into_values().collect())
+            Some(item)
+        }))
     }
 }

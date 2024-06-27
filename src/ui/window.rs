@@ -1,12 +1,13 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
+use futures::StreamExt;
 use gtk::{
-    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
+    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 
-use crate::{band::{self, MiBand}, bluez::BluezSession};
+use crate::{band::{self, MiBand}, bluez::{BluezSession, DiscoveredDeviceEvent}};
 
-use super::device_row::{DeviceRow, DeviceRowObject};
+use super::{device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -38,31 +39,53 @@ impl MiBandWindow {
 
             // get currently known devices
             let devices = MiBand::get_known_bands(session.clone()).await?;
+            let mut shown_devices = HashMap::new();
             for device in devices.into_iter() {
-                model.append(&DeviceRowObject::new(device.address, device.connected, device.rssi.map(|r| r as i32)));
+                let path = device.path.clone();
+                let obj: DeviceRowObject = device.into();
+                model.append(&obj);
+                // add it to our devices list
+                shown_devices.insert(path, obj);
             }
 
             self.imp().devices.replace(Some(model));
             self.imp().list_devices.set_model(Some(&NoSelection::new(self.imp().devices.borrow().clone())));
+
+            let shown_devices = RefCell::new(shown_devices);
+
+            // now continually stream changes
+            MiBand::stream_band_changes(&session).await?.for_each(|e| {
+                let shown_devices = shown_devices.clone();
+                async move {
+                    println!("hi {:?}", e);
+                    match e {
+                        DiscoveredDeviceEvent::DeviceAdded(device) => {
+                            let path = device.path.clone();
+                            let obj: DeviceRowObject = device.into();
+                            self.imp().devices.borrow_mut().as_ref().unwrap().append(&obj);
+                            shown_devices.borrow_mut().insert(path, obj);
+                        },
+                        DiscoveredDeviceEvent::DeviceRemoved(path) => {
+                            if let Some(existing_device) = shown_devices.borrow_mut().remove(&path) {
+                                let devices = self.imp().devices.borrow_mut();
+                                let device_list = devices.as_ref().unwrap();
+                                if let Some(idx) = device_list.find(&existing_device) {
+                                    device_list.remove(idx);
+                                }
+                            }
+                        }
+                    };
+                }
+            }).await;
         }
 
         let device_list_factory = SignalListItemFactory::new();
         device_list_factory.connect_setup(move |_, list_item| {
             let row = DeviceRow::new();
             list_item.downcast_ref::<ListItem>().expect("is a listitem").set_child(Some(&row));
-        });
-        device_list_factory.connect_bind(move |_, list_item| {
-            // bind the device row to the object
-            let list_item = list_item.downcast_ref::<ListItem>().expect("is a listitem");
-            let obj = list_item.item().and_downcast::<DeviceRowObject>().expect("is a device row object");
-            let row = list_item.child().and_downcast::<DeviceRow>().expect("is a device row");
-            row.bind(&obj);
-        });
-        device_list_factory.connect_bind(move |_, list_item| {
-            // call the unbind method on the row
-            let list_item = list_item.downcast_ref::<ListItem>().expect("is a listitem");
-            let row = list_item.child().and_downcast::<DeviceRow>().expect("is a device row");
-            row.unbind();
+
+            // bind list_item->item to row->device
+            list_item.bind_property("item", &row, "device").sync_create().build();
         });
 
         self.imp().list_devices.set_factory(Some(&device_list_factory));
