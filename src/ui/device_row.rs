@@ -1,105 +1,64 @@
-use std::cell::RefCell;
+use gtk::{glib::{self, Object}, Accessible, Box as GtkBox, Buildable, ConstraintTarget, Orientable, Widget};
 
-use gtk::{glib::{self, subclass::InitializingObject, Binding, Object, Properties}, prelude::*, subclass::prelude::*, Accessible, Box as GtkBox, Buildable, CompositeTemplate, ConstraintTarget, Label, Orientable, Widget};
-
-glib::wrapper! {
-    pub struct DeviceRowObject(ObjectSubclass<DeviceRowObjectImpl>);
-}
 
 glib::wrapper! {
-    pub struct DeviceRow(ObjectSubclass<DeviceRowImpl>)
+    pub struct DeviceRow(ObjectSubclass<imp::DeviceRow>)
         @extends GtkBox, Widget,
         @implements Accessible, Buildable, ConstraintTarget, Orientable;
-}
-
-impl DeviceRowObject {
-    pub fn new(address: String, connected: bool, rssi: Option<i32>) -> Self {
-        Object::builder()
-            .property("address", address)
-            .property("connected", connected)
-            // todo: don't defaul to 0
-            .property("rssi", rssi.unwrap_or(0))
-            .build()
-    }
 }
 
 impl DeviceRow {
     pub fn new() -> Self {
         Object::builder().build()
     }
+}
 
-    pub fn bind(&self, obj: &DeviceRowObject) {
-        let mut bindings = self.imp().bindings.borrow_mut();
+mod imp {
+    use std::cell::RefCell;
 
-        let address_label = self.imp().address_label.get();
+    use gtk::{glib::{self, subclass::InitializingObject, Properties}, prelude::*, subclass::prelude::*, Box as GtkBox, CompositeTemplate, Label, Widget};
 
-        // bind the address
-        let address_binding = obj
-            .bind_property("address", &address_label, "label")
-            .sync_create()
-            .build();
+    use crate::ui::device_row_object::DeviceRowObject;
 
-        bindings.push(address_binding);
+    #[derive(Properties, Default, CompositeTemplate)]
+    #[template(resource = "/me/grimsteel/miband4-gtk/device_row.ui")]
+    #[properties(wrapper_type = super::DeviceRow)]
+    pub struct DeviceRow {
+        #[property(get, set)]
+        device: RefCell<Option<DeviceRowObject>>,
+        #[template_child]
+        pub address_label: TemplateChild<Label>,
     }
 
-    pub fn unbind(&self) {
-        // unbind all and remove from the vector
-        for binding in self.imp().bindings.borrow_mut().drain(..) {
-            binding.unbind();
+    #[glib::object_subclass]
+    impl ObjectSubclass for DeviceRow {
+        const NAME: &'static str = "MiBand4DeviceRow";
+        type Type = super::DeviceRow;
+        type ParentType = GtkBox;
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.bind_template();
+        }
+
+        fn instance_init(obj: &InitializingObject<Self>) {
+            obj.init_template();
         }
     }
-}
 
-#[derive(Default)]
-pub struct DeviceRowData {
-    pub address: String,
-    pub connected: bool,
-    pub rssi: i32
-}
+    #[glib::derived_properties]
+    impl ObjectImpl for DeviceRow {
+        fn constructed(&self) {
+            self.parent_constructed();
 
-// Implementation:
-
-#[derive(Properties, Default)]
-#[properties(wrapper_type = DeviceRowObject)]
-pub struct DeviceRowObjectImpl {
-    #[property(name = "address", get, set, type = String, member = address)]
-    #[property(name = "connected", get, set, type = bool, member = connected)]
-    #[property(name = "rssi", get, set, type = i32, member = rssi)]
-    pub data: RefCell<DeviceRowData>
-}
-
-#[glib::object_subclass]
-impl ObjectSubclass for DeviceRowObjectImpl {
-    const NAME: &'static str = "MiBand4DeviceRowObject";
-    type Type = DeviceRowObject;
-}
-
-#[glib::derived_properties]
-impl ObjectImpl for DeviceRowObjectImpl {}
-
-#[derive(Default, CompositeTemplate)]
-#[template(resource = "/me/grimsteel/miband4-gtk/device_row.ui")]
-pub struct DeviceRowImpl {
-    #[template_child]
-    pub address_label: TemplateChild<Label>,
-    pub bindings: RefCell<Vec<Binding>>
-}
-
-#[glib::object_subclass]
-impl ObjectSubclass for DeviceRowImpl {
-    const NAME: &'static str = "MiBand4DeviceRow";
-    type Type = DeviceRow;
-    type ParentType = GtkBox;
-
-    fn class_init(klass: &mut Self::Class) {
-        klass.bind_template();
+            let obj = self.obj();
+            // bind obj->device->address to address_label->label
+            obj.property_expression("device")
+                .chain_property::<DeviceRowObject>("address")
+                .bind(&self.address_label.get(), "label", Widget::NONE);
+        }
     }
 
-    fn instance_init(obj: &InitializingObject<Self>) {
-        obj.init_template();
-    }
-}
+    impl WidgetImpl for DeviceRow {}
 
-impl ObjectImpl for DeviceRowImpl {}
-impl WidgetImpl for DeviceRowImpl {}
-impl BoxImpl for DeviceRowImpl {}
+    impl BoxImpl for DeviceRow {}
+}
