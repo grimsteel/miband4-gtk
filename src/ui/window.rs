@@ -37,26 +37,6 @@ impl MiBandWindow {
         if session.adapter.powered().await? {
             self.set_page("device-list");
 
-
-            // initialize devices list
-            let model = ListStore::new::<DeviceRowObject>();
-
-            // get currently known devices
-            let devices = MiBand::get_known_bands(session.clone()).await?;
-            let mut shown_devices = HashMap::new();
-            for device in devices.into_iter() {
-                let path = device.path.clone();
-                let obj: DeviceRowObject = device.into();
-                model.append(&obj);
-                // add it to our devices list
-                shown_devices.insert(path, obj);
-            }
-
-            self.imp().devices.replace(Some(model));
-            self.imp().list_devices.set_model(Some(&NoSelection::new(Some(self.devices()))));
-
-            let shown_devices = Rc::new(RefCell::new(shown_devices));
-                                                                  
             let device_list_factory = SignalListItemFactory::new();
             device_list_factory.connect_setup(move |_, list_item| {
                 let row = DeviceRow::new();
@@ -72,13 +52,37 @@ impl MiBandWindow {
 
             self.imp().list_devices.set_factory(Some(&device_list_factory));
 
+            // initialize devices list
+            let model = ListStore::new::<DeviceRowObject>();
+
+            // get currently known devices
+            let devices = MiBand::get_known_bands(session.clone()).await?;
+            let mut shown_devices = HashMap::new();
+            // stream of changes for all bands we've seen
+            let mut changes = SelectAll::new();
+            // all band paths that are in the SelectAll above
+            let mut watched_bands = HashSet::new();
+            for device in devices.into_iter() {
+                let obj: DeviceRowObject = device.clone().into();
+                model.append(&obj);
+                // add it to our devices list
+                shown_devices.insert(device.path.clone(), obj);
+                // start watching this band
+                if let Ok(stream) = MiBand::stream_band_events(&session, &device).await.map(|s| s.fuse()) {
+                    changes.push(Box::pin(stream));
+                    watched_bands.insert(device.path);
+                }
+            }
+
+            self.imp().devices.replace(Some(model));
+            self.imp().list_devices.set_model(Some(&NoSelection::new(Some(self.devices()))));
+
+            let shown_devices = Rc::new(RefCell::new(shown_devices));
+
             // now continually stream changes
             spawn_future_local(clone!(@weak self as win, @strong session => async move {
                 if let Ok(stream) = MiBand::stream_known_bands(&session).await.map(|s| s.fuse()) {
-                    // stream of changes for all bands we've seen
-                    let mut changes = SelectAll::new();
-                    // all band paths that are in the SelectAll above
-                    let mut watched_bands = HashSet::new();
+                    
                     pin_mut!(stream);
                     loop {
                         select! {
