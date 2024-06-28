@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Display, io, time::Duration};
 
 use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use futures::{pin_mut, select, AsyncReadExt, AsyncWriteExt, FutureExt, Stream, StreamExt};
+use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, utils::encrypt_value};
@@ -82,6 +82,12 @@ pub struct CurrentActivity {
     steps: u16,
     calories: u16,
     meters: u16
+}
+
+#[derive(Debug)]
+pub enum BandChangeEvent {
+    RSSI(Option<i16>),
+    Connected(bool)
 }
 
 // parse a time out of a 7 byte array
@@ -323,8 +329,28 @@ impl<'a> MiBand<'a> {
         }))
     }
 
-    pub async fn stream_band_events<'b>(session: &'b BluezSession<'b>, device: &DiscoveredDevice) -> Result<impl Stream<Item = BandChangeEvent> + 'b> {
+    pub async fn stream_band_events<'b, 'c>(session: &'b BluezSession<'b>, device: &'c DiscoveredDevice) -> Result<impl Stream<Item = (OwnedObjectPath, BandChangeEvent)>> {
         let proxy = session.proxy_from_discovered_device(&device).await?;
-        
+        let path = device.path.clone();
+        let path2 = device.path.clone();
+        let rssi = proxy.receive_rssi_changed().await
+            .then(move |v| {
+                let path = path.clone();
+                async move {
+                    // rssi may not exist
+                    (path.clone(), BandChangeEvent::RSSI(v.get().await.ok()))
+                }
+            });
+        // stream changes for the connected event too
+        let connected = proxy.receive_connected_changed().await
+            .then(move |v| {
+                let path = path2.clone();
+                async move {
+                    (path.clone(), BandChangeEvent::Connected(v.get().await.unwrap_or(false)))
+                }
+            });
+
+
+        Ok(select(rssi, connected))
     }
 }

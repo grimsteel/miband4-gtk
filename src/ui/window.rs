@@ -1,11 +1,11 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, rc::Rc};
 
-use futures::StreamExt;
+use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
     gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 
-use crate::{band::{self, MiBand}, bluez::{BluezSession, DiscoveredDeviceEvent}};
+use crate::{band::{self, BandChangeEvent, MiBand}, bluez::{BluezSession, DiscoveredDeviceEvent}};
 
 use super::{device_row::DeviceRow, device_row_object::DeviceRowObject};
 
@@ -73,28 +73,70 @@ impl MiBandWindow {
             self.imp().list_devices.set_factory(Some(&device_list_factory));
 
             // now continually stream changes
-            MiBand::stream_known_bands(&session).await?.for_each(|e| {
-                let shown_devices = shown_devices.clone();
-                async move {
-                    match e {
-                        DiscoveredDeviceEvent::DeviceAdded(device) => {
-                            let path = device.path.clone();
-                            let obj: DeviceRowObject = device.into();
-                            self.devices().append(&obj);
-                            shown_devices.borrow_mut().insert(path, obj);
-                        },
-                        DiscoveredDeviceEvent::DeviceRemoved(path) => {
-                            if let Some(existing_device) = shown_devices.borrow_mut().remove(&path) {
-                                // find this device in the list and remove it
-                                let devices = self.devices();
-                                if let Some(idx) = devices.find(&existing_device) {
-                                    devices.remove(idx);
+            spawn_future_local(clone!(@weak self as win, @strong session => async move {
+                if let Ok(stream) = MiBand::stream_known_bands(&session).await.map(|s| s.fuse()) {
+                    // stream of changes for all bands we've seen
+                    let mut changes = SelectAll::new();
+                    // all band paths that are in the SelectAll above
+                    let mut watched_bands = HashSet::new();
+                    pin_mut!(stream);
+                    loop {
+                        select! {
+                            e = stream.next() => {
+                                match e {
+                                    Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
+                                        // if we already have this device, skip the event
+                                        if shown_devices.borrow().contains_key(&device.path) { return; }
+                                        
+                                        let obj: DeviceRowObject = device.clone().into();
+                                        // add it to the device list
+                                        win.devices().append(&obj);
+                                        // add it to our map
+                                        shown_devices.borrow_mut().insert(device.path.clone(), obj);
+
+                                        // if we haven't already started watching this one, start
+                                        if !watched_bands.contains(&device.path) {
+                                            if let Ok(stream) = MiBand::stream_band_events(&session, &device).await.map(|s| s.fuse()) {
+                                                changes.push(Box::pin(stream));
+                                                watched_bands.insert(device.path);
+                                            }
+                                        }
+                                    },
+                                    Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {
+                                        if let Some(existing_device) = shown_devices.borrow_mut().remove(&path) {
+                                            // find this device in the list and remove it
+                                            let devices = win.devices();
+                                            if let Some(idx) = devices.find(&existing_device) {
+                                                devices.remove(idx);
+                                            }
+                                        }
+
+                                        // there's no point trying to stop the `stream_band_events` for this band;
+                                        // dbus should resume sending us updates when it's found again
+                                    },
+                                    None => break
+                                };
+                            },
+                            e = changes.next() => {
+                                match e {
+                                    Some((path, BandChangeEvent::RSSI(rssi))) => {
+                                        if let Some(device) = shown_devices.borrow().get(&path) {
+                                            device.set_rssi(rssi.map(|r| r as i32).unwrap_or(0));
+                                        }
+                                    },
+                                    Some((path, BandChangeEvent::Connected(connected))) => {
+                                        if let Some(device) = shown_devices.borrow().get(&path) {
+                                            device.set_connected(connected);
+                                        }
+                                    },
+                                    // don't break on None
+                                    None => {}
                                 }
                             }
-                        }
-                    };
+                        };
+                    }
                 }
-            }).await;
+            }));
         }
 
         Ok(())

@@ -270,7 +270,7 @@ impl<'a> BluezSession<'a> {
         }).collect())
     }
 
-    pub async fn proxy_from_discovered_device<'b, 'c>(&'c self, device: &'b DiscoveredDevice) -> zbus::Result<DeviceProxy<'b>> {
+    pub async fn proxy_from_discovered_device<'b, 'c, 'd>(&'c self, device: &'b DiscoveredDevice) -> zbus::Result<DeviceProxy<'d>> {
         DeviceProxy::builder(&self.connection).path(device.path.to_owned()).expect("is a valid path").build().await
     }
 }
