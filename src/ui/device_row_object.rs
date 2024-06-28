@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use gtk::glib::{self, Object};
+use zbus::zvariant::OwnedObjectPath;
 
 use crate::bluez::DiscoveredDevice;
 
@@ -7,19 +10,33 @@ glib::wrapper! {
 }
 
 impl DeviceRowObject {
-    pub fn new(address: String, connected: bool, rssi: Option<i32>) -> Self {
+    pub fn new(address: String, connected: bool, rssi: Option<i32>, path: String) -> Self {
         Object::builder()
             .property("address", address)
             .property("connected", connected)
-            // todo: don't defaul to 0
             .property("rssi", rssi.unwrap_or(0))
+            .property("path", path)
             .build()
     }
 }
 
 impl From<DiscoveredDevice> for DeviceRowObject {
     fn from(value: DiscoveredDevice) -> Self {
-        Self::new(value.address, value.connected, value.rssi.map(|v| v as i32))
+        Self::new(value.address, value.connected, value.rssi.map(|v| v as i32), value.path.as_str().into())
+    }
+}
+
+impl From<DeviceRowObject> for DiscoveredDevice {
+    fn from(value: DeviceRowObject) -> Self {
+        let rssi = value.rssi() as i16;
+        Self {
+            path: OwnedObjectPath::try_from(value.path()).unwrap(),
+            connected: value.connected(),
+            rssi: if rssi == 0 { None } else { Some(rssi) },
+            address: value.address(),
+            // we don't store services
+            services: HashSet::new()
+        }
     }
 }
 
@@ -32,13 +49,15 @@ mod imp {
     pub struct DeviceRowData {
         pub address: String,
         pub connected: bool,
-        pub rssi: i32
+        pub rssi: i32,
+        pub path: String
     }
     
     #[derive(Properties, Default)]
     #[properties(wrapper_type = super::DeviceRowObject)]
     pub struct DeviceRowObject {
-        #[property(name = "address", get, set, type = String, member = address)]
+        #[property(name = "address", get, type = String, member = address)]
+        #[property(name = "path", get, type = String, member = path)]
         #[property(name = "connected", get, set, type = bool, member = connected)]
         #[property(name = "rssi", get, set, type = i32, member = rssi)]
         pub data: RefCell<DeviceRowData>

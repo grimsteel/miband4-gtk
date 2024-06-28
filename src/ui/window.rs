@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, time::Duration};
 use async_io::Timer;
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
-    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
+    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 
 use crate::{band::{self, BandChangeEvent, MiBand}, bluez::{BluezSession, DiscoveredDeviceEvent}};
@@ -30,7 +30,7 @@ impl MiBandWindow {
         self.imp().devices.borrow().clone().expect("could not get devices")
     }
 
-    fn setup_device_list(&self, initial_model: ListStore) {
+    fn setup_device_list<'a>(&self, initial_model: ListStore, session: BluezSession<'a>) {
         // setup the factory
         let device_list_factory = SignalListItemFactory::new();
         device_list_factory.connect_setup(move |_, list_item| {
@@ -50,6 +50,14 @@ impl MiBandWindow {
         // setup the model
         self.imp().devices.replace(Some(initial_model));
         self.imp().list_devices.set_model(Some(&NoSelection::new(Some(self.devices()))));
+
+        self.imp().list_devices.connect_activate(|list_view, idx| {
+            let model = list_view.model().expect("the model must not be None at this point");
+            let device_object = model
+                .item(idx)
+                .and_downcast::<DeviceRowObject>()
+                .expect("the item must exist and be a DeviceRowObject");
+        });
     }
 
     async fn initialize(&self) -> band::Result<()> {
@@ -60,8 +68,6 @@ impl MiBandWindow {
         if !session.adapter.powered().await? { return Ok(()) }
 
         self.set_page("device-list");
-
-        
 
         // initialize devices list
         let model = ListStore::new::<DeviceRowObject>();
@@ -85,7 +91,7 @@ impl MiBandWindow {
             }
         }
 
-        self.setup_device_list(model);
+        self.setup_device_list(model, session.clone());
 
         // scan button
         self.imp().btn_start_scan.connect_clicked({
@@ -193,14 +199,21 @@ impl MiBandWindow {
 #[template(resource = "/me/grimsteel/miband4-gtk/window.ui")]
 pub struct MiBandWindowImpl {
     #[template_child]
+    main_stack: TemplateChild<Stack>,
+
+    // device list page
+    #[template_child]
     btn_start_scan: TemplateChild<Button>,
     #[template_child]
-    main_stack: TemplateChild<Stack>,
-    #[template_child]
     list_devices: TemplateChild<ListView>,
-    devices: RefCell<Option<ListStore>>
 
-    //bluez_session: RefCell<Option<BluezSession<'static>>>
+    // device detail page
+    #[template_child]
+    address_label: TemplateChild<Label>,
+    #[template_child]
+    battery_level_label: TemplateChild<Label>,
+    
+    devices: RefCell<Option<ListStore>>
 }
 
 #[object_subclass]

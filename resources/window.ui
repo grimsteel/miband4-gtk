@@ -88,7 +88,7 @@
                       <property name="row">0</property>
                       <property name="column-span">4</property>
                     </layout>
-                  </object
+                  </object>
                 </child>
                 <!-- battery card -->
                 <child>
@@ -108,7 +108,7 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkLabel">
+                      <object class="GtkLabel" id="battery_level_label">
                         <property name="halign">GTK_ALIGN_START</property>
                       </object>
                     </child>
