@@ -49,6 +49,8 @@ trait Adapter {
 
     #[zbus(property)]
     fn powered(&self) -> zbus::Result<bool>;
+    #[zbus(property)]
+    fn discovering(&self) -> zbus::Result<bool>;
 }
 
 #[proxy(default_service = "org.bluez", interface = "org.bluez.Device1", gen_blocking = false)]

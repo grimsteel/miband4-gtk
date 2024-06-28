@@ -1,5 +1,6 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet}, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, time::Duration};
 
+use async_io::Timer;
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
     gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
@@ -86,26 +87,48 @@ impl MiBandWindow {
 
         self.setup_device_list(model);
 
-        let shown_devices = Rc::new(RefCell::new(shown_devices));
+        // scan button
+        self.imp().btn_start_scan.connect_clicked({
+            let session = session.clone();
+            move |_| {
+                let session = session.clone();
+                spawn_future_local(async move {
+                    // start the scan
+                    if let Err(err) = MiBand::start_filtered_discovery(session.clone()).await {
+                        println!("An error occurred while starting discovery: {err:?}");
+                        return;
+                    }
+                    // wait for 10 seconds
+                    Timer::after(Duration::from_secs(10)).await;
+                    // stop the scan
+                    if let Err(err) = session.adapter.stop_discovery().await {
+                        println!("An error occurred while stopping discovery: {err:?}");
+                        return;
+                    }
+                });
+            }
+        });
 
         // now continually stream changes
         spawn_future_local(clone!(@weak self as win, @strong session => async move {
-            if let Ok(stream) = MiBand::stream_known_bands(&session).await.map(|s| s.fuse()) {
-                
-                pin_mut!(stream);
+            let device_stream = MiBand::stream_known_bands(&session).await.map(|s| s.fuse());
+            let scanning_stream = session.adapter.receive_discovering_changed().await.fuse();
+            if let Ok(device_stream) = device_stream {
+                pin_mut!(device_stream);
+                pin_mut!(scanning_stream);
                 loop {
                     select! {
-                        e = stream.next() => {
+                        e = device_stream.next() => {
                             match e {
                                 Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
                                     // if we already have this device, skip the event
-                                    if shown_devices.borrow().contains_key(&device.path) { return; }
+                                    if shown_devices.contains_key(&device.path) { return; }
                                     
                                     let obj: DeviceRowObject = device.clone().into();
                                     // add it to the device list
                                     win.devices().append(&obj);
                                     // add it to our map
-                                    shown_devices.borrow_mut().insert(device.path.clone(), obj);
+                                    shown_devices.insert(device.path.clone(), obj);
 
                                     // if we haven't already started watching this one, start
                                     if !watched_bands.contains(&device.path) {
@@ -116,7 +139,7 @@ impl MiBandWindow {
                                     }
                                 },
                                 Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {
-                                    if let Some(existing_device) = shown_devices.borrow_mut().remove(&path) {
+                                    if let Some(existing_device) = shown_devices.remove(&path) {
                                         // find this device in the list and remove it
                                         let devices = win.devices();
                                         if let Some(idx) = devices.find(&existing_device) {
@@ -133,22 +156,33 @@ impl MiBandWindow {
                         e = changes.next() => {
                             match e {
                                 Some((path, BandChangeEvent::RSSI(rssi))) => {
-                                    if let Some(device) = shown_devices.borrow().get(&path) {
+                                    if let Some(device) = shown_devices.get(&path) {
                                         device.set_rssi(rssi.map(|r| r as i32).unwrap_or(0));
                                     }
                                 },
                                 Some((path, BandChangeEvent::Connected(connected))) => {
-                                    if let Some(device) = shown_devices.borrow().get(&path) {
+                                    if let Some(device) = shown_devices.get(&path) {
                                         device.set_connected(connected);
                                     }
                                 },
                                 // don't break on None
                                 None => {}
                             }
+                        },
+                        e = scanning_stream.next() => {
+                            match e {
+                                Some(prop) => {
+                                    // disable the button when we're scanning
+                                    let scanning = prop.get().await.unwrap_or(false);
+                                    win.imp().btn_start_scan.set_sensitive(!scanning);
+                                },
+                                None => break
+                            }
                         }
                     };
                 }
             }
+            // errors are not critical
         }));
 
         Ok(())

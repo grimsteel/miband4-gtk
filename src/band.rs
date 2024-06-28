@@ -1,6 +1,5 @@
-use std::{collections::HashMap, error::Error, fmt::Display, io, time::Duration};
+use std::{error::Error, fmt::Display, io};
 
-use async_io::Timer;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::OwnedObjectPath;
