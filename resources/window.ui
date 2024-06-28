@@ -40,6 +40,7 @@
                 <child>
                   <object class="GtkButton" id="btn_start_scan">
                     <property name="label">Start scan</property>
+                    <signal name="clicked" handler="handle_start_scan_clicked" swapped="true" />
                     <style>
                       <class name="suggested-action"></class>
                     </style>

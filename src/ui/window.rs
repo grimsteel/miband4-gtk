@@ -4,8 +4,9 @@ use async_io::Timer;
 use async_lock::OnceCell;
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
-    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, Accessible, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
+    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
+use log::error;
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::{band::{self, BandChangeEvent, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}};
@@ -42,6 +43,18 @@ impl MiBandWindow {
         Ok(self.imp().session.get_or_try_init(|| async {
             BluezSession::new().await
         }).await?)
+    }
+
+    fn show_error(&self, message: &str)  {
+        let dialog = AlertDialog::builder()
+            .message("An error occurred")
+            .detail(message)
+            .modal(true)
+            .build();
+
+        error!("{}",message);
+
+        dialog.show(Some(self));
     }
 
     fn setup_device_list(&self, initial_model: ListStore) {
@@ -81,7 +94,7 @@ impl MiBandWindow {
             spawn_future_local(async move {
                 focused.set_sensitive(false);
                 if let Err(err) = win.set_new_band(device).await {
-                    println!("Error while connecting band: {err:?}");
+                    win.show_error(&format!("Error while connecting band: {err:?}"));
                 }
                 focused.set_sensitive(true);
             });
@@ -249,35 +262,24 @@ impl MiBandWindow {
 
         self.setup_device_list(model);
 
-        // scan button
-        self.imp().btn_start_scan.connect_clicked({
-            let session = session.clone();
-            move |_| {
-                let session = session.clone();
-                spawn_future_local(async move {
-                    // start the scan
-                    if let Err(err) = MiBand::start_filtered_discovery(session.clone()).await {
-                        println!("An error occurred while starting discovery: {err:?}");
-                        return;
-                    }
-                    // wait for 10 seconds
-                    Timer::after(Duration::from_secs(10)).await;
-                    // stop the scan
-                    if let Err(err) = session.adapter.stop_discovery().await {
-                        println!("An error occurred while stopping discovery: {err:?}");
-                        return;
-                    }
-                });
-            }
-        });
-
         // now continually stream changes
         spawn_future_local(clone!(@weak self as win => async move {
             if let Err(err) = win.watch_device_changes(shown_devices).await {
-                println!("Error while watching device changes: {err:?}");
+                win.show_error(&format!("Error while watching device changes: {err:?}"));
             }
         }));
 
+        Ok(())
+    }
+
+    async fn run_scan(&self) -> band::Result<()> {
+        let session = self.get_session().await?;
+        // start the scan
+        MiBand::start_filtered_discovery(session.clone()).await?;
+        // wait for 10 seconds
+        Timer::after(Duration::from_secs(10)).await;
+        // stop the scan
+        session.adapter.stop_discovery().await?;
         Ok(())
     }
 }
@@ -292,9 +294,9 @@ pub struct MiBandWindowImpl {
 
     // device list page
     #[template_child]
-    btn_start_scan: TemplateChild<Button>,
-    #[template_child]
     list_devices: TemplateChild<ListView>,
+    #[template_child]
+    btn_start_scan: TemplateChild<Button>,
 
     // device detail page
     #[template_child]
@@ -316,6 +318,18 @@ pub struct MiBandWindowImpl {
     session: OnceCell<BluezSession<'static>>
 }
 
+#[template_callbacks]
+impl MiBandWindowImpl {
+    #[template_callback]
+    fn handle_start_scan_clicked(&self, _button: &Button) {
+        spawn_future_local(clone!(@weak self as imp => async move {
+            if let Err(err) = imp.obj().run_scan().await {
+                imp.obj().show_error(&format!("An error occurred while running the scan: {err:?}"));
+            }
+        }));
+    }
+}
+
 #[object_subclass]
 impl ObjectSubclass for MiBandWindowImpl {
     const NAME: &'static str = "MiBand4Window";
@@ -324,6 +338,7 @@ impl ObjectSubclass for MiBandWindowImpl {
 
     fn class_init(klass: &mut Self::Class) {
         klass.bind_template();
+        klass.bind_template_callbacks()
     }
 
     fn instance_init(obj: &InitializingObject<Self>) {

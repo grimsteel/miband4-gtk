@@ -11,6 +11,8 @@ const APP_ID: &'static str = "me.grimsteel.miband4-gtk";
 
 fn main() -> ExitCode {
     resources_register_include!("resources.gresource").expect("failed to register resources");
+
+    env_logger::init();
     
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_startup(|_app| {
