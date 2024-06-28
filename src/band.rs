@@ -108,8 +108,8 @@ fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
 }
 
 impl<'a> MiBand<'a> {
-    pub async fn from_discovered_device(session: BluezSession<'a>, device: &'a DiscoveredDevice) -> Result<Self> {
-        let device = session.proxy_from_discovered_device(device).await?;
+    pub async fn from_discovered_device<'b>(session: BluezSession<'a>, device_path: OwnedObjectPath) -> Result<Self> {
+        let device = session.proxy_from_discovered_device(device_path).await?;
         Ok(Self {
             device,
             session,
@@ -181,6 +181,12 @@ impl<'a> MiBand<'a> {
         }
 
         return Err(BandError::MissingServicesOrChars);
+    }
+
+    pub async fn disconnect(&mut self) -> Result<()> {
+        self.device.disconnect().await?;
+        self.authenticated = false;
+        Ok(())
     }
 
     /// Authenticate with the band
@@ -328,10 +334,9 @@ impl<'a> MiBand<'a> {
         }))
     }
 
-    pub async fn stream_band_events<'b, 'c>(session: &'b BluezSession<'b>, device: &'c DiscoveredDevice) -> Result<impl Stream<Item = (OwnedObjectPath, BandChangeEvent)>> {
-        let proxy = session.proxy_from_discovered_device(&device).await?;
-        let path = device.path.clone();
-        let path2 = device.path.clone();
+    pub async fn stream_band_events<'b, 'c>(session: &'b BluezSession<'b>, path: OwnedObjectPath) -> Result<impl Stream<Item = (OwnedObjectPath, BandChangeEvent)>> {
+        let proxy = session.proxy_from_discovered_device(path.clone()).await?;
+        let path2 = path.clone();
         let rssi = proxy.receive_rssi_changed().await
             .then(move |v| {
                 let path = path.clone();
