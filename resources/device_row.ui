@@ -8,6 +8,7 @@
     </style>
     <child>
       <object class="GtkLabel" id="address_label">
+        <property name="halign">GTK_ALIGN_START</property>
         <style>
           <class name="heading"></class>
         </style>
@@ -20,6 +21,7 @@
     </child>
     <child>
       <object class="GtkLabel" id="rssi_label">
+        <property name="halign">GTK_ALIGN_START</property>
         <style>
           <class name="monospace" />
           <class name="accent" />
@@ -34,6 +36,7 @@
     <child>
       <object class="GtkLabel" id="connected_label">
         <property name="label">Connected</property>
+        <property name="halign">GTK_ALIGN_START</property>
         <style>
           <class name="success"></class>
         </style>
