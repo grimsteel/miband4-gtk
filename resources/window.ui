@@ -18,6 +18,7 @@
         <property name="margin-top">16</property>
         <property name="margin-start">16</property>
         <property name="margin-end">16</property>
+        <!-- bluetooth off page -->
         <child>
           <object class="GtkStackPage">
             <property name="name">bluetooth-off</property>
@@ -28,6 +29,7 @@
             </property>
           </object>
         </child>
+        <!-- device list page -->
         <child>
           <object class="GtkStackPage">
             <property name="name">device-list</property>
@@ -61,6 +63,59 @@
                         <property name="name">list-devices</property>
                       </object>
                     </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <!-- device detail page -->
+        <child>
+          <object class="GtkStackPage">
+            <property name="name">device-detail</property>
+            <property name="child">
+              <object class="GtkGrid">
+                <property name="row-spacing">12</property>
+                <property name="column-spacing">12</property>
+                <child>
+                  <object class="GtkLabel" id="address_label">
+                    <property name="halign">GTK_ALIGN_START</property>
+                    <style>
+                      <class name="heading"></class>
+                    </style>
+                    <layout>
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="column-span">4</property>
+                    </layout>
+                  </object
+                </child>
+                <!-- battery card -->
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">GTK_ORIENTATION_VERTICAL</property>
+                    <style>
+                      <class name="card"></class>
+                      <class name="device-info-card"></class>
+                    </style>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <property name="label">Battery Level (%)</property>
+                        <style>
+                          <class name="caption"></class>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="halign">GTK_ALIGN_START</property>
+                      </object>
+                    </child>
+                    <layout>
+                      <property name="column">0</property>
+                      <property name="row">1</property>
+                    </layout>
                   </object>
                 </child>
               </object>

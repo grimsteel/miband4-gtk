@@ -15,3 +15,7 @@ row > .card {
     padding-right: 0px;
     margin-bottom: 12px;
 }
+
+.device-info-card.card {
+    padding: 12px;
+}
