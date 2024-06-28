@@ -61,6 +61,7 @@
                       <object class="GtkListView" id="list_devices">
                         <property name="valign">start</property>
                         <property name="name">list-devices</property>
+                        <property name="single-click-activate">true</property>
                       </object>
                     </child>
                   </object>
@@ -81,7 +82,7 @@
                   <object class="GtkLabel" id="address_label">
                     <property name="halign">GTK_ALIGN_START</property>
                     <style>
-                      <class name="heading"></class>
+                      <class name="title-2"></class>
                     </style>
                     <layout>
                       <property name="column">0</property>
@@ -101,15 +102,18 @@
                     <child>
                       <object class="GtkLabel">
                         <property name="halign">GTK_ALIGN_START</property>
-                        <property name="label">Battery Level (%)</property>
+                        <property name="label">Battery Level</property>
                         <style>
-                          <class name="caption"></class>
+                          <class name="dim-label"></class>
                         </style>
                       </object>
                     </child>
                     <child>
                       <object class="GtkLabel" id="battery_level_label">
                         <property name="halign">GTK_ALIGN_START</property>
+                        <style>
+                          <class name="title-4"></class>
+                        </style>
                       </object>
                     </child>
                     <layout>

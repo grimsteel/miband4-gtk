@@ -20,6 +20,7 @@ glib::wrapper! {
 }
 
 impl MiBandWindow {
+    
     pub fn new(app: &Application) -> Self {
         Object::builder().property("application", app).build()
     }
@@ -55,27 +56,61 @@ impl MiBandWindow {
 
         self.imp().list_devices.connect_activate(clone!(@weak self as win => move |list_view, idx| {
             let model = list_view.model().expect("the model must not be None at this point");
+            
             let device: DiscoveredDevice = model
                 .item(idx)
                 .and_downcast::<DeviceRowObject>()
                 .expect("the item must exist and be a DeviceRowObject")
                 .into();
 
+            let focused = list_view.focus_child().unwrap();
+
             spawn_future_local(async move {
-                let mut current_band = win.imp().current_device.borrow_mut();
-                // disconnect the current band if it's connected
-                if let Some(band) = current_band.as_mut() {
-                    if band.is_connected().await {
-                        band.disconnect().await?;
-                    }
+                focused.set_sensitive(false);
+                if let Err(err) = win.set_new_band(device).await {
+                    println!("Error while connecting band: {err:?}");
                 }
-                // connect to the band and store it
-                let mut band = MiBand::from_discovered_device(win.get_session().await?.clone(), device.path).await?;
-                band.initialize().await?;
-                current_band.replace(band);
-                band::Result::Ok(())
+                focused.set_sensitive(true);
             });
         }));
+    }
+
+    async fn show_current_device(&self) -> band::Result<()> {
+        if let Some(device) = &*self.imp().current_device.borrow() {
+            self.imp().address_label.set_label(&device.address);
+            // set everything to loading first
+            self.imp().battery_level_label.set_label("Loading...");
+            
+            let battery_status = device.get_battery().await?;
+            self.imp().battery_level_label.set_label(&format!("{}%", battery_status.battery_level));
+        }
+
+        Ok(())
+    }
+
+    /// connect to, initialize, and show a new band
+    /// disconnects from the old connected band
+    async fn set_new_band(&self, device: DiscoveredDevice) -> band::Result<()> {
+        {
+            let mut current_band = self.imp().current_device.borrow_mut();
+            // disconnect the current band if it's connected
+            if let Some(band) = current_band.as_mut() {
+                if band.is_connected().await {
+                    band.disconnect().await?;
+                }
+            }
+            // connect to the band and store it
+            let mut band = MiBand::from_discovered_device(self.get_session().await?.clone(), device).await?;
+            
+            band.initialize().await?;
+            current_band.replace(band);
+        }
+
+        // show the device detail page
+        self.imp().main_stack.set_visible_child_name("device-detail");
+        self.show_current_device().await?;
+        
+        Ok(())
     }
 
     async fn get_session(&self) -> band::Result<&BluezSession<'static>> {

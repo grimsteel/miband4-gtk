@@ -56,8 +56,8 @@ mod imp {
     #[derive(Properties, Default)]
     #[properties(wrapper_type = super::DeviceRowObject)]
     pub struct DeviceRowObject {
-        #[property(name = "address", get, type = String, member = address)]
-        #[property(name = "path", get, type = String, member = path)]
+        #[property(name = "address", get, set, type = String, member = address)]
+        #[property(name = "path", get, set, type = String, member = path)]
         #[property(name = "connected", get, set, type = bool, member = connected)]
         #[property(name = "rssi", get, set, type = i32, member = rssi)]
         pub data: RefCell<DeviceRowData>

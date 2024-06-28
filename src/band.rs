@@ -65,15 +65,16 @@ pub struct MiBand<'a> {
     session: BluezSession<'a>,
     device: DeviceProxy<'a>,
     pub authenticated: bool,
-    chars: Option<BandChars<'a>>
+    chars: Option<BandChars<'a>>,
+    pub address: String
 }
 
 #[derive(Debug)]
 pub struct BatteryStatus {
-    battery_level: u8,
-    last_off: DateTime<Local>,
-    last_charge: DateTime<Local>,
-    charging: bool
+    pub battery_level: u8,
+    pub last_off: DateTime<Local>,
+    pub last_charge: DateTime<Local>,
+    pub charging: bool
 }
 
 #[derive(Debug)]
@@ -108,13 +109,14 @@ fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
 }
 
 impl<'a> MiBand<'a> {
-    pub async fn from_discovered_device<'b>(session: BluezSession<'a>, device_path: OwnedObjectPath) -> Result<Self> {
-        let device = session.proxy_from_discovered_device(device_path).await?;
+    pub async fn from_discovered_device<'b>(session: BluezSession<'a>, device: DiscoveredDevice) -> Result<Self> {
+        let device_proxy = session.proxy_from_discovered_device(device.path).await?;
         Ok(Self {
-            device,
+            device: device_proxy,
             session,
             authenticated: false,
-            chars: None
+            chars: None,
+            address: device.address
         })
     }
 
