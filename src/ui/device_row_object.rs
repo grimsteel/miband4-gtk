@@ -34,7 +34,7 @@ impl From<DeviceRowObject> for DiscoveredDevice {
             connected: value.connected(),
             rssi: if rssi == 0 { None } else { Some(rssi) },
             address: value.address(),
-            // we don't store services
+            // we don't store services (they aren't needed apart from filtering a list of DiscoveredDevices)
             services: HashSet::new()
         }
     }

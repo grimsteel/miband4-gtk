@@ -950,6 +950,7 @@ version = "0.1.0"
 dependencies = [
  "aes",
  "async-io",
+ "async-lock",
  "async-net",
  "cbc",
  "chrono",
