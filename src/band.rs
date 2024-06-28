@@ -298,7 +298,7 @@ impl<'a> MiBand<'a> {
         } else { Err(BandError::NotInitialized) }
     }
 
-    pub async fn get_known_bands<'b>(session: BluezSession<'b>) -> Result<Vec<DiscoveredDevice>> {
+    pub async fn get_known_bands<'b>(session: &'b BluezSession<'b>) -> Result<Vec<DiscoveredDevice>> {
         let existing_devices = session.get_devices().await?;
         Ok(existing_devices.into_iter().filter(|device| device.services.contains(SERVICE_BAND_0)).collect())
     }

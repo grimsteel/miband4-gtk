@@ -29,119 +29,127 @@ impl MiBandWindow {
         self.imp().devices.borrow().clone().expect("could not get devices")
     }
 
+    fn setup_device_list(&self, initial_model: ListStore) {
+        // setup the factory
+        let device_list_factory = SignalListItemFactory::new();
+        device_list_factory.connect_setup(move |_, list_item| {
+            let row = DeviceRow::new();
+            let list_item = list_item
+                .downcast_ref::<ListItem>()
+                .expect("Needs to be ListItem");
+            
+            list_item.set_child(Some(&row));
+
+            // bind list_item->item to row->device
+            list_item.property_expression("item").bind(&row, "device", Widget::NONE);
+        });
+
+        self.imp().list_devices.set_factory(Some(&device_list_factory));
+
+        // setup the model
+        self.imp().devices.replace(Some(initial_model));
+        self.imp().list_devices.set_model(Some(&NoSelection::new(Some(self.devices()))));
+    }
+
     async fn initialize(&self) -> band::Result<()> {
         // initialize bluez connection
         let session = BluezSession::new().await?;
 
         // make sure bluetooth is on
-        if session.adapter.powered().await? {
-            self.set_page("device-list");
+        if !session.adapter.powered().await? { return Ok(()) }
 
-            let device_list_factory = SignalListItemFactory::new();
-            device_list_factory.connect_setup(move |_, list_item| {
-                let row = DeviceRow::new();
-                let list_item = list_item
-                    .downcast_ref::<ListItem>()
-                    .expect("Needs to be ListItem");
+        self.set_page("device-list");
+
+        
+
+        // initialize devices list
+        let model = ListStore::new::<DeviceRowObject>();
+
+        // get currently known devices
+        let devices = MiBand::get_known_bands(&session).await?;
+        let mut shown_devices = HashMap::new();
+        // stream of changes for all bands we've seen
+        let mut changes = SelectAll::new();
+        // all band paths that are in the SelectAll above
+        let mut watched_bands = HashSet::new();
+        for device in devices.into_iter() {
+            let obj: DeviceRowObject = device.clone().into();
+            model.append(&obj);
+            // add it to our devices list
+            shown_devices.insert(device.path.clone(), obj);
+            // start watching this band
+            if let Ok(stream) = MiBand::stream_band_events(&session, &device).await.map(|s| s.fuse()) {
+                changes.push(Box::pin(stream));
+                watched_bands.insert(device.path);
+            }
+        }
+
+        self.setup_device_list(model);
+
+        let shown_devices = Rc::new(RefCell::new(shown_devices));
+
+        // now continually stream changes
+        spawn_future_local(clone!(@weak self as win, @strong session => async move {
+            if let Ok(stream) = MiBand::stream_known_bands(&session).await.map(|s| s.fuse()) {
                 
-                list_item.set_child(Some(&row));
+                pin_mut!(stream);
+                loop {
+                    select! {
+                        e = stream.next() => {
+                            match e {
+                                Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
+                                    // if we already have this device, skip the event
+                                    if shown_devices.borrow().contains_key(&device.path) { return; }
+                                    
+                                    let obj: DeviceRowObject = device.clone().into();
+                                    // add it to the device list
+                                    win.devices().append(&obj);
+                                    // add it to our map
+                                    shown_devices.borrow_mut().insert(device.path.clone(), obj);
 
-                // bind list_item->item to row->device
-                list_item.property_expression("item").bind(&row, "device", Widget::NONE);
-            });
+                                    // if we haven't already started watching this one, start
+                                    if !watched_bands.contains(&device.path) {
+                                        if let Ok(stream) = MiBand::stream_band_events(&session, &device).await.map(|s| s.fuse()) {
+                                            changes.push(Box::pin(stream));
+                                            watched_bands.insert(device.path);
+                                        }
+                                    }
+                                },
+                                Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {
+                                    if let Some(existing_device) = shown_devices.borrow_mut().remove(&path) {
+                                        // find this device in the list and remove it
+                                        let devices = win.devices();
+                                        if let Some(idx) = devices.find(&existing_device) {
+                                            devices.remove(idx);
+                                        }
+                                    }
 
-            self.imp().list_devices.set_factory(Some(&device_list_factory));
-
-            // initialize devices list
-            let model = ListStore::new::<DeviceRowObject>();
-
-            // get currently known devices
-            let devices = MiBand::get_known_bands(session.clone()).await?;
-            let mut shown_devices = HashMap::new();
-            // stream of changes for all bands we've seen
-            let mut changes = SelectAll::new();
-            // all band paths that are in the SelectAll above
-            let mut watched_bands = HashSet::new();
-            for device in devices.into_iter() {
-                let obj: DeviceRowObject = device.clone().into();
-                model.append(&obj);
-                // add it to our devices list
-                shown_devices.insert(device.path.clone(), obj);
-                // start watching this band
-                if let Ok(stream) = MiBand::stream_band_events(&session, &device).await.map(|s| s.fuse()) {
-                    changes.push(Box::pin(stream));
-                    watched_bands.insert(device.path);
+                                    // there's no point trying to stop the `stream_band_events` for this band;
+                                    // dbus should resume sending us updates when it's found again
+                                },
+                                None => break
+                            };
+                        },
+                        e = changes.next() => {
+                            match e {
+                                Some((path, BandChangeEvent::RSSI(rssi))) => {
+                                    if let Some(device) = shown_devices.borrow().get(&path) {
+                                        device.set_rssi(rssi.map(|r| r as i32).unwrap_or(0));
+                                    }
+                                },
+                                Some((path, BandChangeEvent::Connected(connected))) => {
+                                    if let Some(device) = shown_devices.borrow().get(&path) {
+                                        device.set_connected(connected);
+                                    }
+                                },
+                                // don't break on None
+                                None => {}
+                            }
+                        }
+                    };
                 }
             }
-
-            self.imp().devices.replace(Some(model));
-            self.imp().list_devices.set_model(Some(&NoSelection::new(Some(self.devices()))));
-
-            let shown_devices = Rc::new(RefCell::new(shown_devices));
-
-            // now continually stream changes
-            spawn_future_local(clone!(@weak self as win, @strong session => async move {
-                if let Ok(stream) = MiBand::stream_known_bands(&session).await.map(|s| s.fuse()) {
-                    
-                    pin_mut!(stream);
-                    loop {
-                        select! {
-                            e = stream.next() => {
-                                match e {
-                                    Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
-                                        // if we already have this device, skip the event
-                                        if shown_devices.borrow().contains_key(&device.path) { return; }
-                                        
-                                        let obj: DeviceRowObject = device.clone().into();
-                                        // add it to the device list
-                                        win.devices().append(&obj);
-                                        // add it to our map
-                                        shown_devices.borrow_mut().insert(device.path.clone(), obj);
-
-                                        // if we haven't already started watching this one, start
-                                        if !watched_bands.contains(&device.path) {
-                                            if let Ok(stream) = MiBand::stream_band_events(&session, &device).await.map(|s| s.fuse()) {
-                                                changes.push(Box::pin(stream));
-                                                watched_bands.insert(device.path);
-                                            }
-                                        }
-                                    },
-                                    Some(DiscoveredDeviceEvent::DeviceRemoved(path)) => {
-                                        if let Some(existing_device) = shown_devices.borrow_mut().remove(&path) {
-                                            // find this device in the list and remove it
-                                            let devices = win.devices();
-                                            if let Some(idx) = devices.find(&existing_device) {
-                                                devices.remove(idx);
-                                            }
-                                        }
-
-                                        // there's no point trying to stop the `stream_band_events` for this band;
-                                        // dbus should resume sending us updates when it's found again
-                                    },
-                                    None => break
-                                };
-                            },
-                            e = changes.next() => {
-                                match e {
-                                    Some((path, BandChangeEvent::RSSI(rssi))) => {
-                                        if let Some(device) = shown_devices.borrow().get(&path) {
-                                            device.set_rssi(rssi.map(|r| r as i32).unwrap_or(0));
-                                        }
-                                    },
-                                    Some((path, BandChangeEvent::Connected(connected))) => {
-                                        if let Some(device) = shown_devices.borrow().get(&path) {
-                                            device.set_connected(connected);
-                                        }
-                                    },
-                                    // don't break on None
-                                    None => {}
-                                }
-                            }
-                        };
-                    }
-                }
-            }));
-        }
+        }));
 
         Ok(())
     }
