@@ -7,7 +7,7 @@
     <child type="titlebar">
       <object class="GtkHeaderBar">
         <property name="title-widget">
-          <object class="GtkLabel">
+          <object class="GtkLabel" id="titlebar_label">
             <property name="label">Mi Band 4</property>
           </object>
         </property>
@@ -99,6 +99,8 @@
                       <class name="card"></class>
                       <class name="device-info-card"></class>
                     </style>
+
+                    <!-- battery level -->
                     <child>
                       <object class="GtkLabel">
                         <property name="halign">GTK_ALIGN_START</property>
@@ -116,8 +118,105 @@
                         </style>
                       </object>
                     </child>
+                    
+                    <child>
+                      <object class="GtkSeparator">
+                        <property name="orientation">GTK_ORIENTATION_HORIZONTAL</property>
+                      </object>
+                    </child>
+
+                    <!-- last charged -->
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <property name="label">Last Charged</property>
+                        <style>
+                          <class name="dim-label"></class>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="last_charged_label">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <style>
+                          <class name="title-4"></class>
+                        </style>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkSeparator">
+                        <style>
+                          <class name="spacer"></class>
+                        </style>
+                      </object>
+                    </child>
+
+                    <!-- charging -->
+                    <child>
+                      <object class="GtkLabel" id="charging_label">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <property name="label">Charging</property>
+                        <style>
+                          <class name="title-4"></class>
+                          <class name="success"></class>
+                        </style>
+                      </object>
+                    </child>
+                    
                     <layout>
                       <property name="column">0</property>
+                      <property name="row">1</property>
+                    </layout>
+                  </object>
+                </child>
+
+                <!-- time card -->
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">GTK_ORIENTATION_VERTICAL</property>
+                    <style>
+                      <class name="card"></class>
+                      <class name="device-info-card"></class>
+                    </style>
+
+                    <!-- current time -->
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <property name="label">Band Time</property>
+                        <style>
+                          <class name="dim-label"></class>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="current_time_label">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <style>
+                          <class name="title-4"></class>
+                        </style>
+                      </object>
+                    </child>                   
+
+                    <child>
+                      <object class="GtkSeparator">
+                        <style>
+                          <class name="spacer"></class>
+                        </style>
+                      </object>
+                    </child>
+
+                    <!-- charging -->
+                    <child>
+                      <object class="GtkButton" id="btn_sync_time">
+                        <property name="halign">GTK_ALIGN_START</property>
+                        <property name="label">Sync Time</property>
+                      </object>
+                    </child>
+                    
+                    <layout>
+                      <property name="column">1</property>
                       <property name="row">1</property>
                     </layout>
                   </object>

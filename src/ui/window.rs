@@ -33,6 +33,17 @@ impl MiBandWindow {
         self.imp().devices.borrow().clone().expect("could not get devices")
     }
 
+    fn set_all_titles(&self, title: &str) {
+        self.set_title(Some(&title));
+        self.imp().titlebar_label.set_label(title);
+    }
+
+    async fn get_session(&self) -> band::Result<&BluezSession<'static>> {
+        Ok(self.imp().session.get_or_try_init(|| async {
+            BluezSession::new().await
+        }).await?)
+    }
+
     fn setup_device_list(&self, initial_model: ListStore) {
         // setup the factory
         let device_list_factory = SignalListItemFactory::new();
@@ -55,6 +66,7 @@ impl MiBandWindow {
         self.imp().list_devices.set_model(Some(&NoSelection::new(Some(self.devices()))));
 
         self.imp().list_devices.connect_activate(clone!(@weak self as win => move |list_view, idx| {
+            // get the DiscoveredDevice they clicked
             let model = list_view.model().expect("the model must not be None at this point");
             
             let device: DiscoveredDevice = model
@@ -65,6 +77,7 @@ impl MiBandWindow {
 
             let focused = list_view.focus_child().unwrap();
 
+            // load the band and display it
             spawn_future_local(async move {
                 focused.set_sensitive(false);
                 if let Err(err) = win.set_new_band(device).await {
@@ -77,12 +90,25 @@ impl MiBandWindow {
 
     async fn show_current_device(&self) -> band::Result<()> {
         if let Some(device) = &*self.imp().current_device.borrow() {
+            // display the band address
             self.imp().address_label.set_label(&device.address);
+            self.set_all_titles(&format!("{} - Mi Band 4", device.address));
+            
             // set everything to loading first
             self.imp().battery_level_label.set_label("Loading...");
-            
+            self.imp().last_charged_label.set_label("Loading...");
+            self.imp().charging_label.set_visible(false);
+            self.imp().current_time_label.set_label("Loading...");
+
+            // Battery
             let battery_status = device.get_battery().await?;
             self.imp().battery_level_label.set_label(&format!("{}%", battery_status.battery_level));
+            self.imp().last_charged_label.set_label(&format!("{}", battery_status.last_charge.format("%m/%d/%y %I:%M %p")));
+            self.imp().charging_label.set_visible(battery_status.charging);
+
+            // Time
+            let current_time = device.get_band_time().await?;
+            self.imp().current_time_label.set_label(&format!("{}", current_time.format("%m/%d/%y %I:%M %p")));
         }
 
         Ok(())
@@ -111,12 +137,6 @@ impl MiBandWindow {
         self.show_current_device().await?;
         
         Ok(())
-    }
-
-    async fn get_session(&self) -> band::Result<&BluezSession<'static>> {
-        Ok(self.imp().session.get_or_try_init(|| async {
-            BluezSession::new().await
-        }).await?)
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -267,6 +287,8 @@ impl MiBandWindow {
 pub struct MiBandWindowImpl {
     #[template_child]
     main_stack: TemplateChild<Stack>,
+    #[template_child]
+    titlebar_label: TemplateChild<Label>,
 
     // device list page
     #[template_child]
@@ -279,6 +301,15 @@ pub struct MiBandWindowImpl {
     address_label: TemplateChild<Label>,
     #[template_child]
     battery_level_label: TemplateChild<Label>,
+    #[template_child]
+    last_charged_label: TemplateChild<Label>,
+    #[template_child]
+    charging_label: TemplateChild<Label>,
+
+    #[template_child]
+    current_time_label: TemplateChild<Label>,
+    #[template_child]
+    btn_sync_time: TemplateChild<Button>,
     
     devices: RefCell<Option<ListStore>>,
     current_device: RefCell<Option<MiBand<'static>>>,

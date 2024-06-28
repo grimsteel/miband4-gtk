@@ -19,3 +19,8 @@ row > .card {
 .device-info-card.card {
     padding: 12px;
 }
+
+separator {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
