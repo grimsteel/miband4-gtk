@@ -1,4 +1,4 @@
-use gtk::{gdk::Display, gio::resources_register_include, glib::ExitCode, prelude::*, style_context_add_provider_for_display, Application, CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION};
+use gtk::{gdk::Display, gio::resources_register_include, glib::ExitCode, prelude::*, style_context_add_provider_for_display, Application, CssProvider, STYLE_PROVIDER_PRIORITY_USER};
 use ui::window::MiBandWindow;
 
 mod band;
@@ -19,7 +19,8 @@ fn main() -> ExitCode {
         style_context_add_provider_for_display(
             &Display::default().expect("Could not connect to display"),
             &provider,
-            STYLE_PROVIDER_PRIORITY_APPLICATION,
+            // for some reason my styles aren't working so I have to use user priority...
+            STYLE_PROVIDER_PRIORITY_USER,
         );
         
     });

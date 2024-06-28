@@ -58,6 +58,7 @@
                     <child>
                       <object class="GtkListView" id="list_devices">
                         <property name="valign">start</property>
+                        <property name="name">list-devices</property> 
                       </object>
                     </child>
                   </object>

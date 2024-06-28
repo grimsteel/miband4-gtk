@@ -60,8 +60,11 @@ impl MiBandWindow {
             let device_list_factory = SignalListItemFactory::new();
             device_list_factory.connect_setup(move |_, list_item| {
                 let row = DeviceRow::new();
+                let list_item = list_item
+                    .downcast_ref::<ListItem>()
+                    .expect("Needs to be ListItem");
+                
                 list_item.set_child(Some(&row));
-                list_item.
 
                 // bind list_item->item to row->device
                 list_item.property_expression("item").bind(&row, "device", Widget::NONE);
