@@ -57,6 +57,13 @@ impl MiBandWindow {
         dialog.show(Some(self));
     }
 
+    fn show_home(&self) {
+        // show the device list page
+        self.imp().main_stack.set_visible_child_name("device-list");
+        // hide the back button
+        self.imp().btn_back.set_visible(false);
+    }
+
     fn setup_device_list(&self, initial_model: ListStore) {
         // setup the factory
         let device_list_factory = SignalListItemFactory::new();
@@ -130,23 +137,16 @@ impl MiBandWindow {
     /// connect to, initialize, and show a new band
     /// disconnects from the old connected band
     async fn set_new_band(&self, device: DiscoveredDevice) -> band::Result<()> {
-        {
-            let mut current_band = self.imp().current_device.borrow_mut();
-            // disconnect the current band if it's connected
-            if let Some(band) = current_band.as_mut() {
-                if band.is_connected().await {
-                    band.disconnect().await?;
-                }
-            }
-            // connect to the band and store it
-            let mut band = MiBand::from_discovered_device(self.get_session().await?.clone(), device).await?;
-            
-            band.initialize().await?;
-            current_band.replace(band);
-        }
+        // connect to the band and store it
+        let mut band = MiBand::from_discovered_device(self.get_session().await?.clone(), device).await?;
+        
+        band.initialize().await?;
+        self.imp().current_device.replace(Some(band));
 
         // show the device detail page
         self.imp().main_stack.set_visible_child_name("device-detail");
+        // show the back button
+        self.imp().btn_back.set_visible(true);
         self.show_current_device().await?;
         
         Ok(())
@@ -291,6 +291,8 @@ pub struct MiBandWindowImpl {
     main_stack: TemplateChild<Stack>,
     #[template_child]
     titlebar_label: TemplateChild<Label>,
+    #[template_child]
+    btn_back: TemplateChild<Button>,
 
     // device list page
     #[template_child]
@@ -327,6 +329,10 @@ impl MiBandWindowImpl {
                 imp.obj().show_error(&format!("An error occurred while running the scan: {err:?}"));
             }
         }));
+    }
+    #[template_callback]
+    fn handle_back_clicked(&self) {
+        self.obj().show_home();
     }
 }
 

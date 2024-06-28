@@ -11,6 +11,13 @@
             <property name="label">Mi Band 4</property>
           </object>
         </property>
+        <child type="start">
+          <object class="GtkButton" id="btn_back">
+            <property name="icon-name">back</property>
+            <property name="visible">false</property>
+            <signal name="clicked" handler="handle_back_clicked" swapped="true" />
+          </object>
+        </child>
       </object>
     </child>
     <child>
