@@ -62,6 +62,8 @@ trait Device {
     fn connected(&self) -> zbus::Result<bool>;
     #[zbus(property)]
     fn services_resolved(&self) -> zbus::Result<bool>;
+    #[zbus(property, name="RSSI")]
+    fn rssi(&self) -> zbus::Result<i16>;
 }
 
 impl<'a> DeviceProxy<'a> {

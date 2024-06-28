@@ -312,7 +312,7 @@ impl<'a> MiBand<'a> {
     }
 
     /// discover valid mi bands in the area
-    pub async fn stream_band_changes<'b>(session: &'b BluezSession<'b>)  -> Result<impl Stream<Item = DiscoveredDeviceEvent> + 'b> {
+    pub async fn stream_known_bands<'b>(session: &'b BluezSession<'b>)  -> Result<impl Stream<Item = DiscoveredDeviceEvent> + 'b> {
         let stream = session.stream_device_events().await?;
         Ok(stream.filter_map(move |item| async {
             // make sure added devices are mi bands
@@ -321,5 +321,10 @@ impl<'a> MiBand<'a> {
             }
             Some(item)
         }))
+    }
+
+    pub async fn stream_band_events<'b>(session: &'b BluezSession<'b>, device: &DiscoveredDevice) -> Result<impl Stream<Item = BandChangeEvent> + 'b> {
+        let proxy = session.proxy_from_discovered_device(&device).await?;
+        
     }
 }

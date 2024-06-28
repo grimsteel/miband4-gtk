@@ -73,7 +73,7 @@ impl MiBandWindow {
             self.imp().list_devices.set_factory(Some(&device_list_factory));
 
             // now continually stream changes
-            MiBand::stream_band_changes(&session).await?.for_each(|e| {
+            MiBand::stream_known_bands(&session).await?.for_each(|e| {
                 let shown_devices = shown_devices.clone();
                 async move {
                     match e {
