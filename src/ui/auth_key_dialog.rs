@@ -16,7 +16,7 @@ impl AuthKeyDialog {
 mod imp {
     use std::{cell::RefCell, sync::OnceLock};
 
-    use gtk::{glib::{self, subclass::{InitializingObject, Signal}, Properties}, prelude::*, subclass::prelude::*, template_callbacks, Button, CompositeTemplate, Entry, EntryBuffer, TemplateChild, Window};
+    use gtk::{glib::{self, subclass::{InitializingObject, Signal}, Properties}, prelude::*, subclass::prelude::*, template_callbacks, Button, CompositeTemplate, Entry, TemplateChild, Window};
 
     use crate::utils::is_hex_string;
 
