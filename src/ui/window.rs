@@ -40,10 +40,15 @@ impl MiBandWindow {
         self.imp().titlebar_label.set_label(title);
     }
 
-    async fn get_session(&self) -> band::Result<&BluezSession<'static>> {
-        Ok(self.imp().session.get_or_try_init(|| async {
+    async fn session(&self) -> band::Result<&BluezSession<'static>> {
+        static SESSION: OnceCell<BluezSession<'static>> = OnceCell::new();
+        Ok(SESSION.get_or_try_init(|| async {
             BluezSession::new().await
         }).await?)
+    }
+
+    async fn store(&self) -> io::Result<&Store> {
+        
     }
 
     fn show_error(&self, message: &str)  {
@@ -173,7 +178,7 @@ impl MiBandWindow {
     /// disconnects from the old connected band
     async fn set_new_band(&self, device: DiscoveredDevice) -> band::Result<()> {
         // connect to the band and store it
-        let mut band = MiBand::from_discovered_device(self.get_session().await?.clone(), device).await?;
+        let mut band = MiBand::from_discovered_device(self.session().await?.clone(), device).await?;
         
         band.initialize().await?;
         self.imp().current_device.replace(Some(band));
@@ -188,7 +193,7 @@ impl MiBandWindow {
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
-        let session = self.get_session().await?;
+        let session = self.session().await?;
         
         let device_stream = MiBand::stream_known_bands(session).await?.fuse();
         let scanning_stream = session.adapter.receive_discovering_changed().await.fuse();
@@ -276,7 +281,7 @@ impl MiBandWindow {
     }
 
     async fn initialize(&self) -> band::Result<()> {
-        let session = self.get_session().await?;
+        let session = self.session().await?;
         
         // make sure bluetooth is on
         if !session.adapter.powered().await? { return Ok(()) }
@@ -308,7 +313,7 @@ impl MiBandWindow {
     }
 
     async fn run_scan(&self) -> band::Result<()> {
-        let session = self.get_session().await?;
+        let session = self.session().await?;
         // start the scan
         MiBand::start_filtered_discovery(session.clone()).await?;
         // wait for 10 seconds
@@ -360,8 +365,7 @@ pub struct MiBandWindowImpl {
     auth_key_dialog: TemplateChild<AuthKeyDialog>,
     
     devices: RefCell<Option<ListStore>>,
-    current_device: RefCell<Option<MiBand<'static>>>,
-    session: OnceCell<BluezSession<'static>>
+    current_device: RefCell<Option<MiBand<'static>>>
 }
 
 #[object_subclass]

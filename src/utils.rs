@@ -1,6 +1,8 @@
 use aes::{cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit}, Aes128};
 use cbc::Encryptor;
 
+pub const APP_ID: &'static str = "me.grimsteel.miband4-gtk";
+
 pub fn decode_hex(hex_string: &str) -> Option<Vec<u8>> {
     // make sure it's not odd
     if hex_string.len() & 0b1 == 0b1 { return None; }

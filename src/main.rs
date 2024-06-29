@@ -1,13 +1,12 @@
 use gtk::{gdk::Display, gio::resources_register_include, glib::ExitCode, prelude::*, style_context_add_provider_for_display, Application, CssProvider, STYLE_PROVIDER_PRIORITY_USER};
 use ui::window::MiBandWindow;
+use utils::APP_ID;
 
 mod band;
 mod utils;
 mod bluez;
+mod store;
 mod ui;
-
-const APP_ID: &'static str = "me.grimsteel.miband4-gtk";
-
 
 fn main() -> ExitCode {
     resources_register_include!("resources.gresource").expect("failed to register resources");
