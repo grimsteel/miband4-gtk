@@ -4,14 +4,14 @@ use async_io::Timer;
 use async_lock::OnceCell;
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
-    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Entry, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
+    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Entry, HeaderBar, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 use log::{debug, error};
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::{band::{self, BandChangeEvent, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, utils::decode_hex};
 
-use super::{device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -82,26 +82,7 @@ impl MiBandWindow {
         // show the auth key modal
         self.imp().auth_key_dialog.present();
         // clear the input
-        self.imp().entry_auth_key.buffer().set_text("");
-        self.imp().entry_auth_key.remove_css_class("error");
-    }
-    #[template_callback]
-    fn handle_auth_key_save(&self) {
-        // validate the auth key
-        let input = self.imp().entry_auth_key.buffer().text();
-        if input.len() != 32 {
-            if let Some(key) = decode_hex(input.as_str()) {
-                debug!("auth key: {key:?}");
-                self.imp().entry_auth_key.remove_css_class("error");
-                self.imp().auth_key_dialog.close();
-                return;
-            }
-        }
-        self.imp().entry_auth_key.add_css_class("error");
-    }
-    #[template_callback]
-    fn handle_auth_key_cancel(&self) {
-        self.imp().auth_key_dialog.close();
+        self.imp().auth_key_dialog.set_auth_key("");
     }
 
     fn setup_device_list(&self, initial_model: ListStore) {
@@ -362,9 +343,7 @@ pub struct MiBandWindowImpl {
 
     // auth key
     #[template_child]
-    auth_key_dialog: TemplateChild<Window>,
-    #[template_child]
-    entry_auth_key: TemplateChild<Entry>,
+    auth_key_dialog: TemplateChild<AuthKeyDialog>,
     
     devices: RefCell<Option<ListStore>>,
     current_device: RefCell<Option<MiBand<'static>>>,
@@ -377,9 +356,9 @@ impl ObjectSubclass for MiBandWindowImpl {
     type Type = MiBandWindow;
     type ParentType = ApplicationWindow;
 
-    fn class_init(klass: &mut Self::Class) {
-        klass.bind_template();
-        klass.bind_template_instance_callbacks()
+    fn class_init(class: &mut Self::Class) {
+        class.bind_template();
+        class.bind_template_instance_callbacks()
     }
 
     fn instance_init(obj: &InitializingObject<Self>) {

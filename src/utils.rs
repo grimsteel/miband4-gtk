@@ -19,3 +19,7 @@ pub fn encrypt_value(key: &[u8], value: &[u8]) -> Option<[u8; 48]> {
     encryptor.encrypt_padded_b2b_mut::<Pkcs7>(value, &mut buf).ok()?;
     Some(buf)
 }
+
+pub fn is_hex_string(string: &str) -> bool {
+    string.chars().all(|c| (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+}

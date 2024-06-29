@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="MiBand4AuthKeyDialog" parent="GtkWindow">
+    <property name="title">Set Auth Key</property>
+    <property name="modal">true</property>
+    <property name="destroy-with-parent">true</property>
+    <child type="titlebar">
+      <object class="GtkHeaderBar">
+        <property name="title-widget">
+          <object class="GtkLabel">
+            <property name="label">Set Auth key</property>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkGrid">
+        <property name="row-spacing">12</property>
+        <property name="column-spacing">12</property>
+        <property name="margin-top">16</property>
+        <property name="margin-bottom">16</property>
+        <property name="margin-start">16</property>
+        <property name="margin-end">16</property>
+        <child>
+          <object class="GtkLabel">
+            <property name="halign">GTK_ALIGN_START</property>
+            <property name="label">Enter your band's auth key:</property>
+            <style>
+              <class name="title-2"></class>
+            </style>
+            <layout>
+              <property name="column">0</property>
+              <property name="row">0</property>
+              <property name="column-span">4</property>
+            </layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="halign">GTK_ALIGN_START</property>
+            <property name="label">This enables access to features beyond just fetching basic data from the band. &lt;a href="https://gadgetbridge.org/basics/pairing/huami-xiaomi-server/"&gt;Learn more about how to get this key...&lt;/a&gt;</property>
+            <property name="use-markup">true</property>
+            <layout>
+              <property name="column">0</property>
+              <property name="row">1</property>
+              <property name="column-span">4</property>
+            </layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkEntry" id="entry_auth_key">
+            <property name="placeholder-text">Auth Key (32 hex chars)</property>
+            <layout>
+              <property name="column">0</property>
+              <property name="row">2</property>
+              <property name="column-span">4</property>
+            </layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton">
+            <property name="label">Cancel</property>
+            <signal name="clicked" handler="handle_auth_key_cancel" swapped="true" />
+            <style>
+              <class name="flat" />
+            </style>
+            <layout>
+              <property name="column">2</property>
+              <property name="row">3</property>
+            </layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton">
+            <property name="label">Save</property>
+            <signal name="clicked" handler="handle_auth_key_save" swapped="true" />
+            <style>
+              <class name="suggested-action" />
+            </style>
+            <layout>
+              <property name="column">3</property>
+              <property name="row">3</property>
+            </layout>
+          </object>
+        </child>
+      </object>
+    </child>
+   </template>
+ </interface>
