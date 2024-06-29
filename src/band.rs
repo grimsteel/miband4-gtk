@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, store, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -28,6 +28,7 @@ struct BandChars<'a> {
 pub enum BandError {
     DBusError(zbus::Error),
     IoError(io::Error),
+    StoreError(store::Error),
     MissingServicesOrChars,
     NotInitialized,
     InvalidTime,
@@ -47,6 +48,12 @@ impl From<zbus::Error> for BandError {
 impl From<io::Error> for BandError {
     fn from(value: io::Error) -> Self {
         Self::IoError(value)
+    }
+}
+
+impl From<store::Error> for BandError {
+    fn from(value: store::Error) -> Self {
+        Self::StoreError(value)
     }
 }
 

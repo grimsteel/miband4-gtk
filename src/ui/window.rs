@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet}, time::Duration};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::Mutex, time::Duration};
 
 use async_io::Timer;
 use async_lock::OnceCell;
@@ -9,7 +9,7 @@ use gtk::{
 use log::{debug, error};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{band::{self, BandChangeEvent, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, utils::decode_hex};
+use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::decode_hex};
 
 use super::{auth_key_dialog::AuthKeyDialog, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
@@ -47,8 +47,11 @@ impl MiBandWindow {
         }).await?)
     }
 
-    async fn store(&self) -> io::Result<&Store> {
-        
+    async fn store(&self) -> store::Result<&Mutex<Store>> {
+        static STORE: OnceCell<Mutex<Store>> = OnceCell::new();
+        Ok(STORE.get_or_try_init(|| async {
+            Store::init().await.map(|s| Mutex::new(s))
+        }).await?)
     }
 
     fn show_error(&self, message: &str)  {
@@ -93,13 +96,16 @@ impl MiBandWindow {
     fn handle_auth_key_submit(&self, value: String) {
         if let Some(auth_key) = decode_hex(&value) {
             spawn_future_local(clone!(@weak self as win => async move {
-                if let Some(device) = &mut *win.imp().current_device.borrow_mut() {
-                    if let Err(err) = device.authenticate(&auth_key).await {
-                        win.show_error(&format!("An error occurred while authenticating: {err:?}"));
-                    } else {
-                        println!("succesfully authenticated");
+                let band_mac = win.imp().current_device.borrow().map(|b| b.address.clone());
+                // store this auth key
+                match win.store().await {
+                    Ok(store) => {
+                        store.lock().expect("can lock mutex").
+                    },
+                    Err(err) => {
+                        win.show_error(&format!("An error occurred while retriving the store: {err:?}"));
                     }
-                };
+                }
             }));
         }
     }
@@ -148,7 +154,43 @@ impl MiBandWindow {
         }));
     }
 
-    async fn show_current_device(&self) -> band::Result<()> {
+    /// try to authenticate with the band 
+    async fn try_band_auth(&self) -> band::Result<()> {
+        if let Some(device) = &mut *self.imp().current_device.borrow_mut() {
+            if let Some(auth_key) = self.store()
+                .await?
+                .lock()
+                .expect("can lock mutex")
+                .get_band(device.address.clone())
+                .auth_key.as_ref()
+                .and_then(|key| decode_hex(&key))
+            {
+                match device.authenticate(&auth_key).await {
+                    // authed successfully
+                    Ok(()) => {
+                        // unhighlight the auth key button
+                        self.imp().btn_auth_key.remove_css_class("suggested-action");
+                        return Ok(());
+                    },
+                    Err(BandError::InvalidAuthKey) => {
+                        // notify the user
+                        self.show_error("Invalid auth key");
+                    },
+                    Err(err) => {
+                        // propagate other errors
+                        return Err(err);
+                    }
+                }
+            }       
+        }
+
+        // highlight the auth key button
+        self.imp().btn_auth_key.add_css_class("suggested-action");
+
+        Ok(())
+    }
+
+    async fn reload_current_device(&self) -> band::Result<()> {
         if let Some(device) = &*self.imp().current_device.borrow() {
             // display the band address
             self.imp().address_label.set_label(&device.address);
@@ -181,13 +223,14 @@ impl MiBandWindow {
         let mut band = MiBand::from_discovered_device(self.session().await?.clone(), device).await?;
         
         band.initialize().await?;
+        self.try_band_auth().await?;
         self.imp().current_device.replace(Some(band));
 
         // show the device detail page
         self.imp().main_stack.set_visible_child_name("device-detail");
         // show the back button
         self.imp().btn_back.set_visible(true);
-        self.show_current_device().await?;
+        self.reload_current_device().await?;
         
         Ok(())
     }
