@@ -84,6 +84,20 @@ impl MiBandWindow {
         // clear the input
         self.imp().auth_key_dialog.set_auth_key("");
     }
+    #[template_callback]
+    fn handle_auth_key_submit(&self, value: String) {
+        if let Some(auth_key) = decode_hex(&value) {
+            spawn_future_local(clone!(@weak self as win => async move {
+                if let Some(device) = &mut *win.imp().current_device.borrow_mut() {
+                    if let Err(err) = device.authenticate(&auth_key).await {
+                        win.show_error(&format!("An error occurred while authenticating: {err:?}"));
+                    } else {
+                        println!("succesfully authenticated");
+                    }
+                };
+            }));
+        }
+    }
 
     fn setup_device_list(&self, initial_model: ListStore) {
         // setup the factory

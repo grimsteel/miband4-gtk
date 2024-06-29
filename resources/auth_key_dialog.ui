@@ -4,6 +4,7 @@
     <property name="title">Set Auth Key</property>
     <property name="modal">true</property>
     <property name="destroy-with-parent">true</property>
+    <property name="hide-on-close">true</property>
     <child type="titlebar">
       <object class="GtkHeaderBar">
         <property name="title-widget">

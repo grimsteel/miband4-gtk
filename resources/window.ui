@@ -252,5 +252,6 @@
   </template>
   <object class="MiBand4AuthKeyDialog" id="auth_key_dialog">
     <property name="transient-for">MiBand4Window</property>
+    <signal name="new-auth-key" handler="handle_auth_key_submit" swapped="true" />
   </object>
 </interface>

@@ -16,7 +16,7 @@ impl AuthKeyDialog {
 mod imp {
     use std::{cell::RefCell, sync::OnceLock};
 
-    use gtk::{glib::{self, subclass::{InitializingObject, Signal}, Properties}, prelude::{GObjectPropertyExpressionExt, ObjectExt, StaticType}, subclass::prelude::*, template_callbacks, Button, CompositeTemplate, Entry, TemplateChild, Widget, Window};
+    use gtk::{glib::{self, subclass::{InitializingObject, Signal}, Properties}, prelude::*, subclass::prelude::*, template_callbacks, Button, CompositeTemplate, Entry, EntryBuffer, TemplateChild, Window};
 
     use crate::utils::is_hex_string;
 
@@ -34,15 +34,24 @@ mod imp {
     impl AuthKeyDialog {
         #[template_callback]
         fn handle_auth_key_cancel(&self, _button: &Button) {
-            self.obj().emit_by_name::<()>("closed", &[]);
+            self.obj().close();
         }
         #[template_callback]
         fn handle_auth_key_save(&self, _button: &Button) {
+            self.entry_auth_key.remove_css_class("error");
+            
             // validate the value of the input
-            let value = self.obj().auth_key();
+            let value = self.get_entered_key();
             if value.len() == 32 && is_hex_string(&value) {
-                self.obj().emit_by_name::<()>("confirmed", &[&value]);
+                self.obj().emit_by_name::<()>("new-auth-key", &[&value]);
+                self.obj().close();
+            } else {
+                // reflect that in the state of the entry
+                self.entry_auth_key.add_css_class("error");
             }
+        }
+        fn get_entered_key(&self) -> String {
+            self.entry_auth_key.buffer().text().as_str().to_string()
         }
     }
 
@@ -66,16 +75,22 @@ mod imp {
     impl ObjectImpl for AuthKeyDialog {
         fn constructed(&self) {
             self.parent_constructed();
-            
-            self.obj().property_expression("auth_key").bind(&self.entry_auth_key.get(), "buffer", Widget::NONE);
+
+            // update the entry's contents when auth_key is changed
+            self.obj().connect_auth_key_notify(|win| {
+                win.imp().entry_auth_key.buffer().set_text(win.auth_key());
+            });
+
+            self.obj().connect_show(|win| {
+                win.imp().entry_auth_key.remove_css_class("error");
+            });
         }
 
         fn signals() -> &'static [Signal] {
             static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
             SIGNALS.get_or_init(|| {
                 vec![
-                    Signal::builder("closed").build(),
-                    Signal::builder("confirmed").param_types([String::static_type()]).build()
+                    Signal::builder("new-auth-key").param_types([String::static_type()]).build()
                 ]
             })
         }
