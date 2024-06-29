@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::Mutex, time::Duration};
 
 use async_io::Timer;
-use async_lock::OnceCell;
+use async_lock::{OnceCell, RwLock};
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
     gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Entry, HeaderBar, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
@@ -77,7 +77,7 @@ impl MiBandWindow {
     fn handle_start_scan_clicked(&self, _button: &Button) {
         spawn_future_local(clone!(@weak self as win => async move {
             if let Err(err) = win.run_scan().await {
-                win.show_error(&format!("An error occurred while running the scan: {err:?}"));
+                win.show_error(&format!("An error occurred while running the scan: {err}"));
             }
         }));
     }
@@ -94,20 +94,11 @@ impl MiBandWindow {
     }
     #[template_callback]
     fn handle_auth_key_submit(&self, value: String) {
-        if let Some(auth_key) = decode_hex(&value) {
-            spawn_future_local(clone!(@weak self as win => async move {
-                let band_mac = win.imp().current_device.borrow().map(|b| b.address.clone());
-                // store this auth key
-                match win.store().await {
-                    Ok(store) => {
-                        store.lock().expect("can lock mutex").
-                    },
-                    Err(err) => {
-                        win.show_error(&format!("An error occurred while retriving the store: {err:?}"));
-                    }
-                }
-            }));
-        }
+        spawn_future_local(clone!(@weak self as win => async move {
+            if let Err(err) = win.process_new_auth_key(value).await {
+                win.show_error(&format!("An error occurred while retriving the store: {err}"));
+            }
+        }));
     }
 
     fn setup_device_list(&self, initial_model: ListStore) {
@@ -147,41 +138,51 @@ impl MiBandWindow {
             spawn_future_local(async move {
                 focused.set_sensitive(false);
                 if let Err(err) = win.set_new_band(device).await {
-                    win.show_error(&format!("Error while connecting band: {err:?}"));
+                    win.show_error(&format!("Error while connecting band: {err}"));
                 }
                 focused.set_sensitive(true);
             });
         }));
     }
 
-    /// try to authenticate with the band 
-    async fn try_band_auth(&self) -> band::Result<()> {
-        if let Some(device) = &mut *self.imp().current_device.borrow_mut() {
-            if let Some(auth_key) = self.store()
-                .await?
-                .lock()
-                .expect("can lock mutex")
-                .get_band(device.address.clone())
-                .auth_key.as_ref()
-                .and_then(|key| decode_hex(&key))
-            {
-                match device.authenticate(&auth_key).await {
-                    // authed successfully
-                    Ok(()) => {
-                        // unhighlight the auth key button
-                        self.imp().btn_auth_key.remove_css_class("suggested-action");
-                        return Ok(());
-                    },
-                    Err(BandError::InvalidAuthKey) => {
-                        // notify the user
-                        self.show_error("Invalid auth key");
-                    },
-                    Err(err) => {
-                        // propagate other errors
-                        return Err(err);
-                    }
+    async fn process_new_auth_key(&self, auth_key: String) -> band::Result<()> {
+        if let Some(device) = self.imp().current_device.write().await.as_mut() {
+            // store this auth key
+            let store = self.store().await?;
+
+            let mut store_lock = store.lock().expect("can lock mutex");
+            store_lock.get_band(device.address.clone()).auth_key = Some(auth_key.clone());
+            // save
+            store_lock.save().await?;
+            
+            // actually authenticate
+            self.try_band_auth(device, Some(auth_key)).await?
+        }
+        Ok(())
+    }
+
+    /// try to authenticate with the band
+    /// 
+    /// this method takes `device` and `auth_key` directly because in the two cases
+    /// where I use it, I already have those values
+    async fn try_band_auth<'a>(&self, device: &mut MiBand<'a>, auth_key: Option<String>) -> band::Result<()> {
+        if let Some(auth_key) = auth_key.and_then(|k| decode_hex(&k)) {
+            match device.authenticate(&auth_key).await {
+                // authed successfully
+                Ok(()) => {
+                    // unhighlight the auth key button
+                    self.imp().btn_auth_key.remove_css_class("suggested-action");
+                    return Ok(());
+                },
+                Err(BandError::InvalidAuthKey) => {
+                    // notify the user
+                    self.show_error("Invalid auth key");
+                },
+                Err(err) => {
+                    // propagate other errors
+                    return Err(err);
                 }
-            }       
+            }
         }
 
         // highlight the auth key button
@@ -191,7 +192,7 @@ impl MiBandWindow {
     }
 
     async fn reload_current_device(&self) -> band::Result<()> {
-        if let Some(device) = &*self.imp().current_device.borrow() {
+        if let Some(device) = self.imp().current_device.read().await.as_ref() {
             // display the band address
             self.imp().address_label.set_label(&device.address);
             self.set_all_titles(&format!("{} - Mi Band 4", device.address));
@@ -223,8 +224,14 @@ impl MiBandWindow {
         let mut band = MiBand::from_discovered_device(self.session().await?.clone(), device).await?;
         
         band.initialize().await?;
-        self.try_band_auth().await?;
-        self.imp().current_device.replace(Some(band));
+        // attempt authentication with the current auth key
+        let current_auth_key = self.store().await?
+            .lock()
+            .expect("can lock store")
+            .get_band(band.address.clone()).auth_key.clone();
+        self.try_band_auth(&mut band, current_auth_key).await?;
+        
+        self.imp().current_device.write().await.replace(band);
 
         // show the device detail page
         self.imp().main_stack.set_visible_child_name("device-detail");
@@ -348,7 +355,7 @@ impl MiBandWindow {
         // now continually stream changes
         spawn_future_local(clone!(@weak self as win => async move {
             if let Err(err) = win.watch_device_changes(shown_devices).await {
-                win.show_error(&format!("Error while watching device changes: {err:?}"));
+                win.show_error(&format!("Error while watching device changes: {err}"));
             }
         }));
 
@@ -408,7 +415,7 @@ pub struct MiBandWindowImpl {
     auth_key_dialog: TemplateChild<AuthKeyDialog>,
     
     devices: RefCell<Option<ListStore>>,
-    current_device: RefCell<Option<MiBand<'static>>>
+    current_device: RwLock<Option<MiBand<'static>>>
 }
 
 #[object_subclass]
@@ -435,7 +442,7 @@ impl ObjectImpl for MiBandWindowImpl {
         spawn_future_local(clone!(@weak self as win => async move {
             if let Err(err) = win.obj().initialize().await {
                 // TODO: show err
-                println!("Uncaught error in window initialization: {err:?}");
+                println!("Uncaught error in window initialization: {err}");
                 win.obj().close();
             }
         }));
