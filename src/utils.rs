@@ -1,5 +1,8 @@
+use std::fmt::Display;
+
 use aes::{cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit}, Aes128};
 use cbc::Encryptor;
+use chrono::{DateTime, TimeZone};
 
 pub const APP_ID: &'static str = "me.grimsteel.miband4-gtk";
 
@@ -24,4 +27,8 @@ pub fn encrypt_value(key: &[u8], value: &[u8]) -> Option<[u8; 48]> {
 
 pub fn is_hex_string(string: &str) -> bool {
     string.chars().all(|c| (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+}
+
+pub fn format_date<T: TimeZone<Offset: Display>>(date: &DateTime<T>) -> String {
+    format!("{}", date.format("%m/%d/%y %I:%M %p"))
 }

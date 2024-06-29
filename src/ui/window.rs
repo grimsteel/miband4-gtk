@@ -11,7 +11,7 @@ use zbus::zvariant::OwnedObjectPath;
 
 use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::decode_hex};
 
-use super::{auth_key_dialog::AuthKeyDialog, device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_info::{battery::Battery, card::{DeviceInfoCard, InfoItem, InfoItemType}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -196,8 +196,12 @@ impl MiBandWindow {
             // display the band address
             self.imp().address_label.set_label(&device.address);
             self.set_all_titles(&format!("{} - Mi Band 4", device.address));
+
+            let bat = self.imp().battery.borrow();
+            bat.set_loading();
+            bat.update_from_battery_status(&device.get_battery().await?);
             
-            // set everything to loading first
+            /*// set everything to loading first
             self.imp().battery_level_label.set_label("Loading...");
             self.imp().last_charged_label.set_label("Loading...");
             self.imp().charging_label.set_visible(false);
@@ -211,7 +215,7 @@ impl MiBandWindow {
 
             // Time
             let current_time = device.get_band_time().await?;
-            self.imp().current_time_label.set_label(&format!("{}", current_time.format("%m/%d/%y %I:%M %p")));
+            self.imp().current_time_label.set_label(&format!("{}", current_time.format("%m/%d/%y %I:%M %p")));*/
         }
 
         Ok(())
@@ -240,6 +244,10 @@ impl MiBandWindow {
         self.reload_current_device().await?;
         
         Ok(())
+    }
+
+    fn setup_device_cards(&self) {
+        self.imp().battery.borrow().bind_to_card(&self.imp().info_battery);
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -359,6 +367,8 @@ impl MiBandWindow {
             }
         }));
 
+        self.setup_device_cards();
+
         Ok(())
     }
 
@@ -393,10 +403,13 @@ pub struct MiBandWindowImpl {
     // device detail page
     #[template_child]
     btn_auth_key: TemplateChild<Button>,
-
-    // battery
     #[template_child]
     address_label: TemplateChild<Label>,
+    #[template_child]
+    info_battery: TemplateChild<DeviceInfoCard>,
+    battery: RefCell<Battery>,
+
+    /*// battery
     #[template_child]
     battery_level_label: TemplateChild<Label>,
     #[template_child]
@@ -408,7 +421,7 @@ pub struct MiBandWindowImpl {
     #[template_child]
     current_time_label: TemplateChild<Label>,
     #[template_child]
-    btn_sync_time: TemplateChild<Button>,
+    btn_sync_time: TemplateChild<Button>,*/
 
     // auth key
     #[template_child]

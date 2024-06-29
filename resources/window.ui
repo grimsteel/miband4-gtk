@@ -113,7 +113,17 @@
                     </layout>
                   </object>
                 </child>
-                <!-- battery card -->
+
+                <child>
+                  <object class="MiBand4DeviceInfoCard" id="info_battery">
+                    <layout>
+                      <property name="column">0</property>
+                      <property name="row">1</property>
+                    </layout>
+                  </object>
+                </child>
+
+                <!-- 
                 <child>
                   <object class="GtkBox">
                     <property name="orientation">GTK_ORIENTATION_VERTICAL</property>
@@ -122,7 +132,6 @@
                       <class name="device-info-card"></class>
                     </style>
 
-                    <!-- battery level -->
                     <child>
                       <object class="GtkLabel">
                         <property name="halign">GTK_ALIGN_START</property>
@@ -147,7 +156,6 @@
                       </object>
                     </child>
 
-                    <!-- last charged -->
                     <child>
                       <object class="GtkLabel">
                         <property name="halign">GTK_ALIGN_START</property>
@@ -174,7 +182,6 @@
                       </object>
                     </child>
 
-                    <!-- charging -->
                     <child>
                       <object class="GtkLabel" id="charging_label">
                         <property name="halign">GTK_ALIGN_START</property>
@@ -192,7 +199,7 @@
                     </layout>
                   </object>
                 </child>
-
+                -->
                 <!-- time card -->
                 <child>
                   <object class="GtkBox">
