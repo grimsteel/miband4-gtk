@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gtk::{glib::{self, clone, Object}, prelude::*, subclass::prelude::*, Accessible, Align, Box as GtkBox, Buildable, Button, ConstraintTarget, Label, Orientable, Orientation, Separator, Widget};
+use gtk::{glib::{self, clone, Object}, pango::EllipsizeMode, prelude::*, subclass::prelude::*, Accessible, Align, Box as GtkBox, Buildable, Button, ConstraintTarget, Label, Orientable, Orientation, Separator, Widget};
 
 use log::warn;
 
@@ -42,6 +42,7 @@ impl DeviceInfoCard {
                     // the actual field value
                     let value_label = Label::new(None);
                     value_label.set_halign(Align::Start);
+                    value_label.set_ellipsize(EllipsizeMode::End);
                     value_label.add_css_class("title-4");
                     for class in classes.iter() { value_label.add_css_class(class); }
                     

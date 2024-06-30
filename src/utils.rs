@@ -37,8 +37,8 @@ pub fn format_date<T: TimeZone<Offset: Display>>(date: &DateTime<T>) -> String {
 pub fn meters_to_imperial(meters: u16) -> String {
     // below 0.1 miles (528 feet, 161 meters), display in feet
     if meters < 161 {
-        format!("{} ft", (meters as f64) * 3.281)
+        format!("{:.3} ft", (meters as f64) * 3.281)
     } else {
-        format!("{} mi", (meters as f64) / 1609.344)
+        format!("{:.3} mi", (meters as f64) / 1609.344)
     }
 }
