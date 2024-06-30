@@ -18,6 +18,15 @@ jobs:
         name: Checkout
       - uses: dtolnay/rust-toolchain@stable
         name: Setup Rust
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-cargo-${{ hashFiles('Cargo.lock') }}
       - run: cargo build --release
         name: Build
       - uses: actions/upload-artifact@v4
