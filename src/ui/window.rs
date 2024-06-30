@@ -2,6 +2,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::Mutex, time::Dur
 
 use async_io::Timer;
 use async_lock::{OnceCell, RwLock};
+use chrono::Local;
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
     gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
@@ -9,9 +10,9 @@ use gtk::{
 use log::error;
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::decode_hex};
+use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::{decode_hex, format_date}};
 
-use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::BATTERY_ITEMS}, device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::{DeviceInfoCard, InfoItemValue}, card_implementations::{IntoInfoItemValues, BATTERY_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -100,6 +101,27 @@ impl MiBandWindow {
             }
         }));
     }
+    #[template_callback]
+    fn handle_info_time_clicked(&self, id: String) {
+        if id == "sync_time" {
+            spawn_future_local(clone!(@weak self as win => async move {
+                if let Some(device) = win.imp().current_device.read().await.as_ref() {
+                    let card = &win.imp().info_time;
+                    card.set_loading();
+                    let current_time = Local::now();
+                    // set the band time
+                    if let Err(err) = device.set_band_time(current_time).await {
+                        win.show_error(&format!("An error occurred while setting the band time: {err}"));
+                    }
+                    // refresh the time fropm the band
+                    match device.get_band_time().await {
+                        Err(err) => win.show_error(&format!("An error occurred while getting the band time: {err}")),
+                        Ok(time) => card.apply_values(&(time, true).into_info_item_values())
+                    }
+                };
+            }));
+        }
+    }
 
     fn setup_device_list(&self, initial_model: ListStore) {
         // setup the factory
@@ -158,6 +180,10 @@ impl MiBandWindow {
             // actually authenticate
             self.try_band_auth(device, Some(auth_key)).await?
         }
+
+        // refresh the contents of the band detail screen
+        self.reload_current_device().await?;
+        
         Ok(())
     }
 
@@ -192,30 +218,21 @@ impl MiBandWindow {
     }
 
     async fn reload_current_device(&self) -> band::Result<()> {
-        if let Some(device) = self.imp().current_device.read().await.as_ref() {
+        let imp = self.imp();
+        if let Some(device) = imp.current_device.read().await.as_ref() {
             // display the band address
-            self.imp().address_label.set_label(&device.address);
+            imp.address_label.set_label(&device.address);
             self.set_all_titles(&format!("{} - Mi Band 4", device.address));
-            
-            self.imp().info_battery.set_loading();
-            
-            self.imp().info_battery.apply_values(&device.get_battery().await?.into());
-            
-            /*// set everything to loading first
-            self.imp().battery_level_label.set_label("Loading...");
-            self.imp().last_charged_label.set_label("Loading...");
-            self.imp().charging_label.set_visible(false);
-            self.imp().current_time_label.set_label("Loading...");
 
-            // Battery
-            let battery_status = device.get_battery().await?;
-            self.imp().battery_level_label.set_label(&format!("{}%", battery_status.battery_level));
-            self.imp().last_charged_label.set_label(&format!("{}", battery_status.last_charge.format("%m/%d/%y %I:%M %p")));
-            self.imp().charging_label.set_visible(battery_status.charging);
-
-            // Time
-            let current_time = device.get_band_time().await?;
-            self.imp().current_time_label.set_label(&format!("{}", current_time.format("%m/%d/%y %I:%M %p")));*/
+            // set everything to loading
+            imp.info_battery.set_loading();
+            imp.info_time.set_loading();
+            
+            imp.info_battery.apply_values(&device.get_battery().await?.into_info_item_values());
+            imp.info_time.apply_values(&(
+                device.get_band_time().await?,
+                device.authenticated
+            ).into_info_item_values());
         }
 
         Ok(())
@@ -224,6 +241,8 @@ impl MiBandWindow {
     /// connect to, initialize, and show a new band
     /// disconnects from the old connected band
     async fn set_new_band(&self, device: DiscoveredDevice) -> band::Result<()> {
+        let imp = self.imp();
+        
         // connect to the band and store it
         let mut band = MiBand::from_discovered_device(self.session().await?.clone(), device).await?;
         
@@ -233,21 +252,28 @@ impl MiBandWindow {
             .lock()
             .expect("can lock store")
             .get_band(band.address.clone()).auth_key.clone();
+        
+        // set the value of the auth key dialog to whatever they had
+        imp.auth_key_dialog.set_auth_key(current_auth_key.clone().unwrap_or_default());
+        
         self.try_band_auth(&mut band, current_auth_key).await?;
         
-        self.imp().current_device.write().await.replace(band);
+        imp.current_device.write().await.replace(band);
 
         // show the device detail page
-        self.imp().main_stack.set_visible_child_name("device-detail");
-        // show the back button
-        self.imp().btn_back.set_visible(true);
+        imp.main_stack.set_visible_child_name("device-detail");
+        // show the header buttons
+        imp.btn_back.set_visible(true);
+        imp.btn_reload.set_visible(true);
         self.reload_current_device().await?;
         
         Ok(())
     }
 
     fn setup_device_cards(&self) {
-        self.imp().info_battery.handle_items(&BATTERY_ITEMS);
+        let imp = self.imp();
+        imp.info_battery.handle_items(&BATTERY_ITEMS);
+        imp.info_time.handle_items(&TIME_ITEMS);
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -407,20 +433,8 @@ pub struct MiBandWindowImpl {
     address_label: TemplateChild<Label>,
     #[template_child]
     info_battery: TemplateChild<DeviceInfoCard>,
-
-    /*// battery
     #[template_child]
-    battery_level_label: TemplateChild<Label>,
-    #[template_child]
-    last_charged_label: TemplateChild<Label>,
-    #[template_child]
-    charging_label: TemplateChild<Label>,
-
-    // time
-    #[template_child]
-    current_time_label: TemplateChild<Label>,
-    #[template_child]
-    btn_sync_time: TemplateChild<Button>,*/
+    info_time: TemplateChild<DeviceInfoCard>,
 
     // auth key
     #[template_child]

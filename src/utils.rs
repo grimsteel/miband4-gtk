@@ -26,7 +26,7 @@ pub fn encrypt_value(key: &[u8], value: &[u8]) -> Option<[u8; 48]> {
 }
 
 pub fn is_hex_string(string: &str) -> bool {
-    string.chars().all(|c| (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+    string.chars().all(|c| (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))
 }
 
 pub fn format_date<T: TimeZone<Offset: Display>>(date: &DateTime<T>) -> String {

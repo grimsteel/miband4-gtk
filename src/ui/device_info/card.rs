@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gtk::{glib::{self, Object}, prelude::*, subclass::prelude::*, Accessible, Align, Box as GtkBox, Buildable, Button, ConstraintTarget, Label, Orientable, Orientation, Separator, Widget};
+use gtk::{glib::{self, clone, Object}, prelude::*, subclass::prelude::*, Accessible, Align, Box as GtkBox, Buildable, Button, ConstraintTarget, Label, Orientable, Orientation, Separator, Widget};
 
 use log::warn;
 
@@ -28,39 +28,48 @@ impl DeviceInfoCard {
                 }
                 self.append(&separator);
             }
+
+            let id: String = (*id).into();
             
             match item_type {
                 InfoItemType::Field => {
+                    // a label for this field
                     let field_label = Label::new(Some(label));
                     field_label.set_halign(Align::Start);
                     field_label.add_css_class("dim-label");
                     self.append(&field_label);
 
+                    // the actual field value
                     let value_label = Label::new(None);
                     value_label.set_halign(Align::Start);
                     value_label.add_css_class("title-4");
                     for class in classes.iter() { value_label.add_css_class(class); }
+                    
                     self.append(&value_label);
-
-                    widget_map.push(((*id).into(), InfoItemWidget::Field(value_label)));
+                    widget_map.push((id, InfoItemWidget::Field(value_label)));
                 },
                 InfoItemType::Button => {
                     let button = Button::new();
                     button.set_label(label);
                     for class in classes.iter() { button.add_css_class(class); }
                     button.set_halign(Align::Start);
-                    self.append(&button);
 
-                    widget_map.push(((*id).into(), InfoItemWidget::Button(button)));
+                    // connect the event listener
+                    button.connect_clicked(clone!(@weak self as win, @strong id => move |_button| {
+                        win.emit_by_name::<()>("button-clicked", &[&id]);
+                    }));
+                    
+                    self.append(&button);
+                    widget_map.push((id, InfoItemWidget::Button(button)));
                 },
                 InfoItemType::Indicator => {
                     let indicator = Label::new(Some(label));
                     indicator.set_halign(Align::Start);
                     indicator.add_css_class("title-4");
                     for class in classes.iter() { indicator.add_css_class(class); }
+                    
                     self.append(&indicator);
-
-                    widget_map.push(((*id).into(), InfoItemWidget::Indicator(indicator)));
+                    widget_map.push((id, InfoItemWidget::Indicator(indicator)));
                 }
             }
         }
@@ -79,14 +88,14 @@ impl DeviceInfoCard {
                         label.set_visible(false);
                     },
                     InfoItemWidget::Button(button) => {
-                        button.set_sensitive(true);
+                        button.set_sensitive(false);
                     }
                 }
             }
         }
     }
     /// set the values of the widget to the values provided
-    pub fn apply_values(&self, values: &HashMap<String, InfoItemValue>) {
+    pub fn apply_values(&self, values: &InfoItemValues) {
         if let Some(items) = self.imp().items.get() {
             for (id, widget) in items {
                 // get the corresponding value
@@ -139,17 +148,19 @@ pub enum InfoItemValue {
 #[derive(Eq, PartialEq, Debug)]
 pub enum InfoItemType { Field, Indicator, Button }
 
-mod imp {
-    use std::cell::OnceCell;
+pub type InfoItemValues = HashMap<String, InfoItemValue>;
 
-    use gtk::{glib, prelude::*, subclass::prelude::*, Orientation, Box as GtkBox};
+mod imp {
+    use std::{cell::OnceCell, sync::OnceLock};
+
+    use gtk::{glib::{self, subclass::Signal}, prelude::*, subclass::prelude::*, Box as GtkBox, Orientation};
 
     use super::InfoItemWidget;
 
     #[derive(Default)]
     pub struct DeviceInfoCard {
         // item ID + enum-widget
-        pub items: OnceCell<Vec<(String, InfoItemWidget)>>
+        pub(super) items: OnceCell<Vec<(String, InfoItemWidget)>>
     }
 
     #[glib::object_subclass]
@@ -160,6 +171,18 @@ mod imp {
     }
 
     impl ObjectImpl for DeviceInfoCard {
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
+            SIGNALS.get_or_init(|| {
+                vec![
+                    Signal::builder("button-clicked")
+                        // param is the id of the button
+                        .param_types([String::static_type()])
+                        .build()
+                ]
+            })
+        }
+        
         fn constructed(&self) {
             self.parent_constructed();
 
