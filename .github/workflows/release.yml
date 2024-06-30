@@ -11,13 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    container:
+      image: ghcr.io/gtk-rs/gtk4-rs/gtk4:latest
     steps:
       - uses: actions/checkout@v4
         name: Checkout
       - uses: dtolnay/rust-toolchain@stable
         name: Setup Rust
-      - run: sudo apt install pkg-config libgtk-4-dev gtk4
-        name: Install native dependencies
       - run: cargo build --release
         name: Build
       - uses: actions/upload-artifact@v4
