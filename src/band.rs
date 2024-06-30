@@ -35,8 +35,8 @@ pub enum BandError {
     Utf8Error,
     RequiresAuth,
     InvalidAuthKey,
-    Failed,
-    UnknownError
+    //Failed,
+    //UnknownError
 }
 
 impl From<zbus::Error> for BandError {
@@ -57,9 +57,22 @@ impl From<store::Error> for BandError {
     }
 }
 
+// Human-readable BandErrors
 impl Display for BandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::DBusError(err) => write!(f, "D-Bus error: {}", err),
+            Self::IoError(err) => write!(f, "I/O error: {}", err),
+            Self::StoreError(err) => write!(f, "Store error: {}", err),
+            Self::MissingServicesOrChars => write!(f, "Device is missing required BLE services or characteristics"),
+            Self::NotInitialized => write!(f, "Device connection is not initialized"),
+            Self::InvalidTime => write!(f, "Device sent an invalid time"),
+            Self::Utf8Error => write!(f, "Device sent invalid UTF-8 text"),
+            Self::RequiresAuth => write!(f, "The operation requires authentication"),
+            Self::InvalidAuthKey => write!(f, "Invalid auth key"),
+            //Self::Failed => write!(f, "The operation failed"),
+            //Self::UnknownError => write!(f, "An unknown error occurred")
+        }
     }
 }
 
@@ -79,7 +92,7 @@ pub struct MiBand<'a> {
 #[derive(Debug)]
 pub struct BatteryStatus {
     pub battery_level: u8,
-    pub last_off: DateTime<Local>,
+    //pub last_off: DateTime<Local>,
     pub last_charge: DateTime<Local>,
     pub charging: bool
 }
@@ -253,13 +266,13 @@ impl<'a> MiBand<'a> {
             let battery_level = value[1];
             let charging = value[2] != 0;
 
-            let last_off = parse_time(&value[3..]).ok_or(BandError::InvalidTime)?;
+            //let last_off = parse_time(&value[3..]).ok_or(BandError::InvalidTime)?;
             let last_charge = parse_time(&value[11..]).ok_or(BandError::InvalidTime)?;
 
             Ok(BatteryStatus {
                 battery_level,
                 charging,
-                last_off,
+                //last_off,
                 last_charge
             })
         } else { Err(BandError::NotInitialized) }

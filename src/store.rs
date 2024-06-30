@@ -27,8 +27,8 @@ impl From<serde_json::Error> for Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IoError(err) => write!(f, "StoreError - {} (IoError)", err),
-            Self::SerdeError(err) => write!(f, "StoreError - {} (SerdeError)", err),
+            Self::IoError(err) => write!(f, "I/O error: {}", err),
+            Self::SerdeError(err) => write!(f, "Serialization error: {}", err),
         }
     }
 }
