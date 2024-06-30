@@ -23,5 +23,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         name: Upload built binary
         with:
-          name: mi-band-4-gtk
-          path: target/release/mi_band_gtk
+          name: miband4-gtk
+          path: target/release/miband4-gtk
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        name: Create release
+        with:
+          files: target/release/miband4-gtk

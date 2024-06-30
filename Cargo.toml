@@ -1,5 +1,5 @@
 [package]
-name = "mi_band_gtk"
+name = "miband4-gtk"
 version = "0.1.0"
 edition = "2021"
 
