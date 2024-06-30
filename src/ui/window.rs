@@ -11,7 +11,7 @@ use zbus::zvariant::OwnedObjectPath;
 
 use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::decode_hex};
 
-use super::{auth_key_dialog::AuthKeyDialog, device_info::{battery::Battery, card::{DeviceInfoCard, InfoItem, InfoItemType}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::BATTERY_ITEMS}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -196,10 +196,10 @@ impl MiBandWindow {
             // display the band address
             self.imp().address_label.set_label(&device.address);
             self.set_all_titles(&format!("{} - Mi Band 4", device.address));
-
-            let bat = self.imp().battery.borrow();
-            bat.set_loading();
-            bat.update_from_battery_status(&device.get_battery().await?);
+            
+            self.imp().info_battery.set_loading();
+            
+            self.imp().info_battery.apply_values(&device.get_battery().await?.into());
             
             /*// set everything to loading first
             self.imp().battery_level_label.set_label("Loading...");
@@ -247,7 +247,7 @@ impl MiBandWindow {
     }
 
     fn setup_device_cards(&self) {
-        self.imp().battery.borrow().bind_to_card(&self.imp().info_battery);
+        self.imp().info_battery.handle_items(&BATTERY_ITEMS);
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -407,7 +407,6 @@ pub struct MiBandWindowImpl {
     address_label: TemplateChild<Label>,
     #[template_child]
     info_battery: TemplateChild<DeviceInfoCard>,
-    battery: RefCell<Battery>,
 
     /*// battery
     #[template_child]

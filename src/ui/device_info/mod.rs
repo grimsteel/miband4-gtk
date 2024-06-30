@@ -1,2 +1,2 @@
 pub mod card;
-pub mod battery;
+pub mod card_implementations;
