@@ -232,6 +232,7 @@ impl<'a> MiBand<'a> {
                             return Ok(());
                         },
                         &[0x03, 0x08] => {
+                            self.authenticated = false;
                             // invalid auth key
                             return Err(BandError::InvalidAuthKey);
                         },
