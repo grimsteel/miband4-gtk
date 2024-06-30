@@ -2,7 +2,7 @@ use std::{error::Error, fmt::Display, io};
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
 use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, store, utils::encrypt_value};
 
@@ -99,9 +99,9 @@ pub struct BatteryStatus {
 
 #[derive(Debug)]
 pub struct CurrentActivity {
-    steps: u16,
-    calories: u16,
-    meters: u16
+    pub steps: u16,
+    pub calories: u16,
+    pub meters: u16
 }
 
 #[derive(Debug)]
@@ -158,6 +158,10 @@ impl<'a> MiBand<'a> {
 
     pub async fn is_connected(&self) -> bool {
         self.device.connected().await.unwrap_or(false)
+    }
+
+    pub fn path<'b>(&'b self) -> &'b ObjectPath {
+        self.device.path()
     }
 
     /// iterate through all the services and characteristics in order to find the ones we need

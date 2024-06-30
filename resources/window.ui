@@ -115,7 +115,7 @@
                       <class name="suggested-action"></class>
                     </style>
                     <layout>
-                      <property name="column">4</property>
+                      <property name="column">3</property>
                       <property name="row">0</property>
                     </layout>
                   </object>
@@ -132,9 +132,28 @@
 
                 <child>
                   <object class="MiBand4DeviceInfoCard" id="info_time">
-                    <signal name="button-clicked" handler="handle_info_time_clicked" swapped="true" />
+                    <signal name="button-clicked" handler="handle_info_card_clicked" swapped="true" />
                     <layout>
                       <property name="column">1</property>
+                      <property name="row">1</property>
+                    </layout>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="MiBand4DeviceInfoCard" id="info_device">
+                    <signal name="button-clicked" handler="handle_info_card_clicked" swapped="true" />
+                    <layout>
+                      <property name="column">2</property>
+                      <property name="row">1</property>
+                    </layout>
+                  </object>
+                </child>
+                
+                <child>
+                  <object class="MiBand4DeviceInfoCard" id="info_activity">
+                    <layout>
+                      <property name="column">3</property>
                       <property name="row">1</property>
                     </layout>
                   </object>

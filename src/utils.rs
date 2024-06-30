@@ -32,3 +32,13 @@ pub fn is_hex_string(string: &str) -> bool {
 pub fn format_date<T: TimeZone<Offset: Display>>(date: &DateTime<T>) -> String {
     format!("{}", date.format("%m/%d/%y %I:%M %p"))
 }
+
+/// returns the equivalent distance in feet or miles
+pub fn meters_to_imperial(meters: u16) -> String {
+    // below 0.1 miles (528 feet, 161 meters), display in feet
+    if meters < 161 {
+        format!("{} ft", (meters as f64) * 3.281)
+    } else {
+        format!("{} mi", (meters as f64) / 1609.344)
+    }
+}

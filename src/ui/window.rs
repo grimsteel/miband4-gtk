@@ -10,9 +10,9 @@ use gtk::{
 use log::error;
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::{decode_hex, format_date}};
+use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::decode_hex};
 
-use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::{DeviceInfoCard, InfoItemValue}, card_implementations::{IntoInfoItemValues, BATTERY_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::{IntoInfoItemValues, ACTIVITY_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -108,8 +108,10 @@ impl MiBandWindow {
             }
         }));
     }
+    
     #[template_callback]
-    fn handle_info_time_clicked(&self, id: String) {
+    /// handles the click events for the buttons on the info cards
+    fn handle_info_card_clicked(&self, id: String) {
         if id == "sync_time" {
             spawn_future_local(clone!(@weak self as win => async move {
                 if let Some(device) = win.imp().current_device.read().await.as_ref() {
@@ -125,6 +127,16 @@ impl MiBandWindow {
                         Err(err) => win.show_error(&format!("An error occurred while getting the band time: {err}")),
                         Ok(time) => card.apply_values(&(time, true).into_info_item_values())
                     }
+                };
+            }));
+        } else if id == "disconnect" {
+            spawn_future_local(clone!(@weak self as win => async move {
+                if let Some(device) = win.imp().current_device.write().await.as_mut() {
+                    if let Err(err) = device.disconnect().await {
+                        win.show_error(&format!("An error occurred while disconnecting: {err}"));
+                    }
+                    // go back to the home screen
+                    win.show_home();
                 };
             }));
         }
@@ -231,15 +243,25 @@ impl MiBandWindow {
             imp.address_label.set_label(&device.address);
             self.set_all_titles(&format!("{} - Mi Band 4", device.address));
 
+            // if not connected, stop here
+            if !device.is_connected().await { return Ok(()) }
+
             // set everything to loading
             imp.info_battery.set_loading();
             imp.info_time.set_loading();
-            
+            imp.info_device.set_loading();
+
+            // load all of the data
             imp.info_battery.apply_values(&device.get_battery().await?.into_info_item_values());
             imp.info_time.apply_values(&(
                 device.get_band_time().await?,
                 device.authenticated
             ).into_info_item_values());
+            imp.info_device.apply_values(&(
+                device,
+                device.get_firmware_revision().await?
+            ).into_info_item_values());
+            imp.info_activity.apply_values(&device.get_current_activity().await?.into_info_item_values());
         }
 
         Ok(())
@@ -281,6 +303,8 @@ impl MiBandWindow {
         let imp = self.imp();
         imp.info_battery.handle_items(&BATTERY_ITEMS);
         imp.info_time.handle_items(&TIME_ITEMS);
+        imp.info_device.handle_items(&DEVICE_INFO_ITEMS);
+        imp.info_activity.handle_items(&ACTIVITY_ITEMS);
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -444,6 +468,10 @@ pub struct MiBandWindowImpl {
     info_battery: TemplateChild<DeviceInfoCard>,
     #[template_child]
     info_time: TemplateChild<DeviceInfoCard>,
+    #[template_child]
+    info_device: TemplateChild<DeviceInfoCard>,
+    #[template_child]
+    info_activity: TemplateChild<DeviceInfoCard>,
 
     // auth key
     #[template_child]
