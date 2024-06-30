@@ -18,6 +18,13 @@
             <signal name="clicked" handler="handle_back_clicked" swapped="true" />
           </object>
         </child>
+        <child type="end">
+          <object class="GtkButton" id="btn_reload">
+            <property name="icon-name">reload</property>
+            <property name="visible">false</property>
+            <signal name="clicked" handler="handle_reload_clicked" swapped="true" />
+          </object>
+        </child>
       </object>
     </child>
     <child>

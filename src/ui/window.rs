@@ -70,8 +70,9 @@ impl MiBandWindow {
     fn show_home(&self) {
         // show the device list page
         self.imp().main_stack.set_visible_child_name("device-list");
-        // hide the back button
+        // hide the header buttons
         self.imp().btn_back.set_visible(false);
+        self.imp().btn_reload.set_visible(false);
     }
 
     #[template_callback]
@@ -87,11 +88,17 @@ impl MiBandWindow {
         self.show_home();
     }
     #[template_callback]
+    fn handle_reload_clicked(&self) {
+        spawn_future_local(clone!(@weak self as win => async move {
+            if let Err(err) = win.reload_current_device().await {
+                win.show_error(&format!("An error occurred while reloading the band: {err}"));
+            }
+        }));
+    }
+    #[template_callback]
     fn handle_auth_key_clicked(&self) {
         // show the auth key modal
         self.imp().auth_key_dialog.present();
-        // clear the input
-        self.imp().auth_key_dialog.set_auth_key("");
     }
     #[template_callback]
     fn handle_auth_key_submit(&self, value: String) {
@@ -417,6 +424,8 @@ pub struct MiBandWindowImpl {
     main_stack: TemplateChild<Stack>,
     #[template_child]
     titlebar_label: TemplateChild<Label>,
+    #[template_child]
+    btn_reload: TemplateChild<Button>,
     #[template_child]
     btn_back: TemplateChild<Button>,
 
