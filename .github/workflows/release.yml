@@ -16,7 +16,7 @@ jobs:
         name: Checkout
       - uses: dtolnay/rust-toolchain@stable
         name: Setup Rust
-      - run: sudo apt install pkg-config libgtk-4-dev
+      - run: sudo apt install pkg-config libgtk-4-dev gtk4
         name: Install native dependencies
       - run: cargo build --release
         name: Build
