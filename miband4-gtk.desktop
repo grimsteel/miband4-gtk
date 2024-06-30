@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Mi Band 4
+Type=Application
+Exec=miband4-gtk
+Terminal=false
+Comment=GTK 4 Interface for the Mi Smart Band 4
