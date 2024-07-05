@@ -12,7 +12,7 @@ use zbus::zvariant::OwnedObjectPath;
 
 use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, ActivityGoal, Store}, utils::decode_hex};
 
-use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::{ACTIVITY_GOAL_ITEMS, ACTIVITY_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::{DeviceInfoCard, InfoItemValue}, card_implementations::{ACTIVITY_GOAL_ITEMS, ACTIVITY_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -139,7 +139,27 @@ impl MiBandWindow {
                     win.show_home();
                 };
             }));
-        }
+        } else if id == "save_goal" {
+            spawn_future_local(clone!(@weak self as win => async move {
+                let card = &win.imp().info_activity_goal;
+                card.set_loading();
+
+                let values = card.get_values();
+                let new_goal_config = ActivityGoal {
+                    steps: values.get("steps")
+                    // get the steps value and parse it as a u16
+                        .and_then(|v| if let InfoItemValue::Entry(val) = v { val.trim().parse().ok() } else { None })
+                        .unwrap_or_default(),
+                    notifications: values.get("notifications")
+                    // get the bool out of the switch
+                        .and_then(|v| if let InfoItemValue::Switch(val) = v { Some(*val) } else { None })
+                        .unwrap_or_default(),
+                };
+                if let Err(err) = win.process_new_goal_config(new_goal_config).await {
+                    win.show_error(&format!("An error occurred while setting the new goal config: {err}"));
+                }
+            }));
+    }
     }
 
     fn setup_device_list(&self, initial_model: ListStore) {
@@ -203,6 +223,20 @@ impl MiBandWindow {
         // refresh the contents of the band detail screen
         self.reload_current_device().await?;
         
+        Ok(())
+    }
+
+    async fn process_new_goal_config(&self, goal_config: ActivityGoal) -> band::Result<()> {
+        if let Some(device) = self.imp().current_device.read().await.as_ref() {
+            // set the goal config
+            device.set_activity_goal(&goal_config).await?;
+            self.imp().info_activity_goal.apply_values(&goal_config);
+            // remember it
+            let mut store_lock = self.store().await?
+                .lock().expect("can lock store");
+            store_lock.get_band(device.address.clone()).activity_goal = Some(goal_config);
+            store_lock.save().await?;
+        };
         Ok(())
     }
 

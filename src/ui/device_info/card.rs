@@ -165,6 +165,20 @@ impl DeviceInfoCard {
             }
         }
     }
+    /// get the value of the switches and entries
+    pub fn get_values(&self) -> HashMap<&str, InfoItemValue> {
+        if let Some(items) = self.imp().items.get() {
+            items.iter().filter_map(|item| {
+                match item {
+                    (id, InfoItemWidget::Switch(switch)) => Some((id.as_str(), InfoItemValue::Switch(switch.is_active()))),
+                    (id, InfoItemWidget::Entry(entry)) => Some((id.as_str(), InfoItemValue::Entry(entry.buffer().text().as_str().to_string()))),
+                    _ => None
+                }
+            }).collect()
+        } else {
+            HashMap::new()
+        }
+    }
 }
 
 #[derive(Debug)]

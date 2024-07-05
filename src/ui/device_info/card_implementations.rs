@@ -33,7 +33,7 @@ pub const ACTIVITY_ITEMS: [InfoItem<'static>; 3] = [
 pub const ACTIVITY_GOAL_ITEMS: [InfoItem<'static>; 3] = [
     InfoItem { item_type: InfoItemType::Entry, id: "steps", label: "Step Goal", classes: &[] },
     InfoItem { item_type: InfoItemType::Switch, id: "notifications", label: "Goal Notifications", classes: &[] },
-    InfoItem { item_type: InfoItemType::Button, id: "save", label: "Save", classes: &[] }
+    InfoItem { item_type: InfoItemType::Button, id: "save_goal", label: "Save", classes: &[] }
 ];
 
 pub trait IntoInfoItemValues {
@@ -89,7 +89,7 @@ impl IntoInfoItemValues for &ActivityGoal {
             ("steps".into(), InfoItemValue::Entry(self.steps.to_string())),
             ("notifications".into(), InfoItemValue::Switch(self.notifications)),
             // always enabled
-            ("save".into(), InfoItemValue::Button(true))
+            ("save_goal".into(), InfoItemValue::Button(true))
         ])
     }
 }

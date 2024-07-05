@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
-use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, store, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, store::{self, ActivityGoal}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -15,6 +15,7 @@ const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
 const CHAR_SOFT_REV: &'static str = "00002a28-0000-1000-8000-00805f9b34fb";
 const CHAR_TIME: &'static str = "00002a2b-0000-1000-8000-00805f9b34fb";
 const CHAR_CONFIG: &'static str = "00000003-0000-3512-2118-0009af100700";
+const CHAR_SETTINGS: &'static str = "00000008-0000-3512-2118-0009af100700";
 
 #[derive(Debug)]
 struct BandChars<'a> {
@@ -23,7 +24,8 @@ struct BandChars<'a> {
     firm_rev: GattCharacteristicProxy<'a>,
     time: GattCharacteristicProxy<'a>,
     auth: GattCharacteristicProxy<'a>,
-    config: GattCharacteristicProxy<'a>
+    config: GattCharacteristicProxy<'a>,
+    settings: GattCharacteristicProxy<'a>,
 }
 
 #[derive(Debug)]
@@ -193,12 +195,13 @@ impl<'a> MiBand<'a> {
                     band_0.remove(CHAR_STEPS),
                     band_0.remove(CHAR_TIME),
                     band_0.remove(CHAR_CONFIG),
+                    band_0.remove(CHAR_SETTINGS),
                     device_info.remove(CHAR_SOFT_REV),
                     band_1.remove(CHAR_AUTH)
                 ) {
-                    (Some(battery), Some(steps), Some(time), Some(config), Some(firm_rev), Some(auth)) => {
+                    (Some(battery), Some(steps), Some(time), Some(config), Some(settings), Some(firm_rev), Some(auth)) => {
                         let chars = BandChars {
-                            battery, steps, time, config, firm_rev, auth
+                            battery, steps, time, config, firm_rev, auth, settings
                         };
 
                         return Ok(chars);
@@ -323,17 +326,17 @@ impl<'a> MiBand<'a> {
     }
 
     /// set the daily goal notification state + step count
-    pub async fn set_activity_goal(&self, notifications: bool, steps: u16) -> Result<()> {
+    pub async fn set_activity_goal(&self, goal: &ActivityGoal) -> Result<()> {
         if !self.authenticated { return Err(BandError::RequiresAuth) }
         
-        if let Some(BandChars { config, .. }) = &self.chars {
+        if let Some(BandChars { config, settings, .. }) = &self.chars {
             // enable/disable notifications
-            let notifs_enabled_byte = if notifications { 0x01 } else { 0x00 };
+            let notifs_enabled_byte = if goal.notifications { 0x01 } else { 0x00 };
             config.write_value_command(&vec![0x06, 0x06, 0x00, notifs_enabled_byte]).await?;
 
             // set the actual goal
-            let goal_payload = vec![0x10, 0x00, 0x00, (steps & 0xff) as u8, (steps >> 8) as u8, 0x00, 0x00];
-            config.write_value_request(&goal_payload).await?;
+            let goal_payload = vec![0x10, 0x00, 0x00, (goal.steps & 0xff) as u8, (goal.steps >> 8) as u8, 0x00, 0x00];
+            settings.write_value_request(&goal_payload).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
     }
