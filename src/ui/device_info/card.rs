@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use gtk::{glib::{self, clone, Object}, pango::EllipsizeMode, prelude::*, subclass::prelude::*, Accessible, Align, Box as GtkBox, Buildable, Button, ConstraintTarget, Label, Orientable, Orientation, Separator, Widget};
+use gtk::{glib::{self, clone, Object}, pango::EllipsizeMode, prelude::*, subclass::prelude::*, Accessible, Align, Box as GtkBox, Buildable, Button, ConstraintTarget, Entry, Label, Orientable, Orientation, Separator, Switch, Widget};
 
 use log::warn;
+
+use super::card_implementations::IntoInfoItemValues;
 
 glib::wrapper! {
     pub struct DeviceInfoCard(ObjectSubclass<imp::DeviceInfoCard>)
@@ -22,7 +24,7 @@ impl DeviceInfoCard {
             if i > 0 {
                 // add a separator
                 let separator = Separator::new(Orientation::Horizontal);
-                if item_type != &InfoItemType::Field {
+                if item_type == &InfoItemType::Button || item_type == &InfoItemType::Indicator {
                     // blank separator
                     separator.add_css_class("spacer");
                 }
@@ -71,6 +73,33 @@ impl DeviceInfoCard {
                     
                     self.append(&indicator);
                     widget_map.push((id, InfoItemWidget::Indicator(indicator)));
+                },
+                InfoItemType::Switch => {
+                    // a label for this switch
+                    let field_label = Label::new(Some(label));
+                    field_label.set_halign(Align::Start);
+                    field_label.add_css_class("dim-label");
+                    self.append(&field_label);
+
+                    // the toggle siwtch
+                    let switch = Switch::new();
+                    switch.set_halign(Align::Start);
+
+                    self.append(&switch);
+                    widget_map.push((id, InfoItemWidget::Switch(switch)));
+                },
+                InfoItemType::Entry => {
+                    // a label for this entry
+                    let field_label = Label::new(Some(label));
+                    field_label.set_halign(Align::Start);
+                    field_label.add_css_class("dim-label");
+                    self.append(&field_label);
+
+                    // the text entry
+                    let entry = Entry::new();
+
+                    self.append(&entry);
+                    widget_map.push((id, InfoItemWidget::Entry(entry)));
                 }
             }
         }
@@ -90,13 +119,20 @@ impl DeviceInfoCard {
                     },
                     InfoItemWidget::Button(button) => {
                         button.set_sensitive(false);
+                    },
+                    InfoItemWidget::Switch(switch) => {
+                        switch.set_sensitive(false);
+                    },
+                    InfoItemWidget::Entry(entry) => {
+                        entry.set_sensitive(false);
                     }
                 }
             }
         }
     }
     /// set the values of the widget to the values provided
-    pub fn apply_values(&self, values: &InfoItemValues) {
+    pub fn apply_values<T: IntoInfoItemValues>(&self, values: T) {
+        let values = values.into_info_item_values();
         if let Some(items) = self.imp().items.get() {
             for (id, widget) in items {
                 // get the corresponding value
@@ -111,6 +147,14 @@ impl DeviceInfoCard {
                         },
                         (InfoItemValue::Button(enabled), InfoItemWidget::Button(button)) => {
                             button.set_sensitive(*enabled);
+                        },
+                        (InfoItemValue::Switch(checked), InfoItemWidget::Switch(switch)) => {
+                            switch.set_sensitive(true);
+                            switch.set_active(*checked);
+                        },
+                        (InfoItemValue::Entry(contents), InfoItemWidget::Entry(entry)) => {
+                            entry.set_sensitive(true);
+                            entry.buffer().set_text(contents);
                         },
                         _ => {
                             // they provided the wrong value type for this widget
@@ -135,7 +179,9 @@ pub struct InfoItem<'a> {
 enum InfoItemWidget {
     Field(Label),
     Indicator(Label),
-    Button(Button)
+    Button(Button),
+    Switch(Switch),
+    Entry(Entry)
 }
 
 /// a single value representing the state
@@ -143,11 +189,13 @@ enum InfoItemWidget {
 pub enum InfoItemValue {
     Field(String),
     Indicator(bool),
-    Button(bool)
+    Button(bool),
+    Switch(bool),
+    Entry(String)
 }
 
 #[derive(Eq, PartialEq, Debug)]
-pub enum InfoItemType { Field, Indicator, Button }
+pub enum InfoItemType { Field, Indicator, Button, Switch, Entry }
 
 pub type InfoItemValues = HashMap<String, InfoItemValue>;
 

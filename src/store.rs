@@ -36,9 +36,23 @@ impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Serialize, Deserialize)]
+pub struct ActivityGoal {
+    pub notifications: bool,
+    pub steps: u16
+}
+
+impl Default for ActivityGoal {
+    fn default() -> Self {
+        Self { notifications: true, steps: 10000 }
+    }
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct BandConf {
     pub auth_key: Option<String>,
+
+    pub activity_goal: Option<ActivityGoal>,
     //pub alias: Option<String>
 }
 

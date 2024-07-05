@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
-use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy, WriteOptions}, store, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, store, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -192,11 +192,11 @@ impl<'a> MiBand<'a> {
                     band_0.remove(CHAR_BATTERY),
                     band_0.remove(CHAR_STEPS),
                     band_0.remove(CHAR_TIME),
-                    band_1.remove(CHAR_CONFIG),
+                    band_0.remove(CHAR_CONFIG),
                     device_info.remove(CHAR_SOFT_REV),
                     band_1.remove(CHAR_AUTH)
                 ) {
-                    (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth), Some(config)) => {
+                    (Some(battery), Some(steps), Some(time), Some(config), Some(firm_rev), Some(auth)) => {
                         let chars = BandChars {
                             battery, steps, time, config, firm_rev, auth
                         };
@@ -333,7 +333,7 @@ impl<'a> MiBand<'a> {
 
             // set the actual goal
             let goal_payload = vec![0x10, 0x00, 0x00, (steps & 0xff) as u8, (steps >> 8) as u8, 0x00, 0x00];
-            config.write_value_request(&goal_payload).await;
+            config.write_value_request(&goal_payload).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
     }

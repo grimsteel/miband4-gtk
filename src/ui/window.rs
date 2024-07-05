@@ -10,9 +10,9 @@ use gtk::{
 use log::error;
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, Store}, utils::decode_hex};
+use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, ActivityGoal, Store}, utils::decode_hex};
 
-use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::{IntoInfoItemValues, ACTIVITY_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
+use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::{ACTIVITY_GOAL_ITEMS, ACTIVITY_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
 glib::wrapper! {
     pub struct MiBandWindow(ObjectSubclass<MiBandWindowImpl>)
@@ -125,7 +125,7 @@ impl MiBandWindow {
                     // refresh the time fropm the band
                     match device.get_band_time().await {
                         Err(err) => win.show_error(&format!("An error occurred while getting the band time: {err}")),
-                        Ok(time) => card.apply_values(&(time, true).into_info_item_values())
+                        Ok(time) => card.apply_values((time, true))
                     }
                 };
             }));
@@ -238,7 +238,7 @@ impl MiBandWindow {
 
     async fn reload_current_device(&self) -> band::Result<()> {
         let imp = self.imp();
-        if let Some(device) = imp.current_device.read().await.as_ref() {
+        if let Some(device) = imp.current_device.read().await.as_ref() {            
             // display the band address
             imp.address_label.set_label(&device.address);
             self.set_all_titles(&format!("{} - Mi Band 4", device.address));
@@ -250,18 +250,32 @@ impl MiBandWindow {
             imp.info_battery.set_loading();
             imp.info_time.set_loading();
             imp.info_device.set_loading();
+            imp.info_activity.set_loading();
+            imp.info_activity_goal.set_loading();
 
             // load all of the data
-            imp.info_battery.apply_values(&device.get_battery().await?.into_info_item_values());
-            imp.info_time.apply_values(&(
+            imp.info_battery.apply_values(device.get_battery().await?);
+            imp.info_time.apply_values((
                 device.get_band_time().await?,
                 device.authenticated
-            ).into_info_item_values());
-            imp.info_device.apply_values(&(
+            ));
+            imp.info_device.apply_values((
                 device,
                 device.get_firmware_revision().await?
-            ).into_info_item_values());
-            imp.info_activity.apply_values(&device.get_current_activity().await?.into_info_item_values());
+            ));
+            imp.info_activity.apply_values(device.get_current_activity().await?);
+
+            let mut store = self.store().await?
+                .lock()
+                .expect("can lock store");
+            let band_conf = &*store.get_band(device.address.clone());
+
+            if let Some(goal) = band_conf.activity_goal.as_ref() {
+                imp.info_activity_goal.apply_values(goal);
+            } else {
+                imp.info_activity_goal.apply_values(&ActivityGoal::default());
+            }
+            
         }
 
         Ok(())
@@ -305,6 +319,7 @@ impl MiBandWindow {
         imp.info_time.handle_items(&TIME_ITEMS);
         imp.info_device.handle_items(&DEVICE_INFO_ITEMS);
         imp.info_activity.handle_items(&ACTIVITY_ITEMS);
+        imp.info_activity_goal.handle_items(&ACTIVITY_GOAL_ITEMS);
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -472,6 +487,8 @@ pub struct MiBandWindowImpl {
     info_device: TemplateChild<DeviceInfoCard>,
     #[template_child]
     info_activity: TemplateChild<DeviceInfoCard>,
+    #[template_child]
+    info_activity_goal: TemplateChild<DeviceInfoCard>,
 
     // auth key
     #[template_child]

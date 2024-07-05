@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Local};
 
-use crate::{band::{BatteryStatus, CurrentActivity, MiBand}, utils::{format_date, meters_to_imperial}};
+use crate::{band::{BatteryStatus, CurrentActivity, MiBand}, store::ActivityGoal, utils::{format_date, meters_to_imperial}};
 
 use super::card::{InfoItem, InfoItemType, InfoItemValue, InfoItemValues};
 
@@ -28,6 +28,12 @@ pub const ACTIVITY_ITEMS: [InfoItem<'static>; 3] = [
     InfoItem { item_type: InfoItemType::Field, id: "steps", label: "Steps", classes: &[] },
     InfoItem { item_type: InfoItemType::Field, id: "distance", label: "Distance", classes: &[] },
     InfoItem { item_type: InfoItemType::Field, id: "calories", label: "Calories Burned", classes: &[] }
+];
+
+pub const ACTIVITY_GOAL_ITEMS: [InfoItem<'static>; 3] = [
+    InfoItem { item_type: InfoItemType::Entry, id: "steps", label: "Step Goal", classes: &[] },
+    InfoItem { item_type: InfoItemType::Switch, id: "notifications", label: "Goal Notifications", classes: &[] },
+    InfoItem { item_type: InfoItemType::Button, id: "save", label: "Save", classes: &[] }
 ];
 
 pub trait IntoInfoItemValues {
@@ -73,6 +79,17 @@ impl<'a> IntoInfoItemValues for (&MiBand<'a>, String) {
             ("firmware_version".into(), InfoItemValue::Field(self.1)),
             ("dbus_path".into(), InfoItemValue::Field(self.0.path().as_str().to_string())),
             ("disconnect".into(), InfoItemValue::Button(true))
+        ])
+    }
+}
+
+impl IntoInfoItemValues for &ActivityGoal {
+    fn into_info_item_values(self) -> InfoItemValues {
+        HashMap::from([
+            ("steps".into(), InfoItemValue::Entry(self.steps.to_string())),
+            ("notifications".into(), InfoItemValue::Switch(self.notifications)),
+            // always enabled
+            ("save".into(), InfoItemValue::Button(true))
         ])
     }
 }
