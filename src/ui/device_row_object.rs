@@ -10,9 +10,10 @@ glib::wrapper! {
 }
 
 impl DeviceRowObject {
-    pub fn new(address: String, connected: bool, rssi: Option<i32>, path: String) -> Self {
+    pub fn new(address: String, connected: bool, rssi: Option<i32>, path: String, alias: String) -> Self {
         Object::builder()
             .property("address", address)
+            .property("alias", alias)
             .property("connected", connected)
             .property("rssi", rssi.unwrap_or(0))
             .property("path", path)
@@ -20,9 +21,10 @@ impl DeviceRowObject {
     }
 }
 
-impl From<DiscoveredDevice> for DeviceRowObject {
-    fn from(value: DiscoveredDevice) -> Self {
-        Self::new(value.address, value.connected, value.rssi.map(|v| v as i32), value.path.as_str().into())
+// Device, Alias
+impl From<(DiscoveredDevice, String)> for DeviceRowObject {
+    fn from((value, alias): (DiscoveredDevice, String)) -> Self {
+        Self::new(value.address, value.connected, value.rssi.map(|v| v as i32), value.path.as_str().into(), alias)
     }
 }
 
@@ -50,7 +52,8 @@ mod imp {
         pub address: String,
         pub connected: bool,
         pub rssi: i32,
-        pub path: String
+        pub path: String,
+        pub alias: String
     }
     
     #[derive(Properties, Default)]
@@ -60,6 +63,7 @@ mod imp {
         #[property(name = "path", get, set, type = String, member = path)]
         #[property(name = "connected", get, set, type = bool, member = connected)]
         #[property(name = "rssi", get, set, type = i32, member = rssi)]
+        #[property(name = "alias", get, set, type = String, member = alias)]
         pub data: RefCell<DeviceRowData>
     }
 

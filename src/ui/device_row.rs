@@ -57,7 +57,7 @@ mod imp {
             let obj = self.obj();
             let device = obj.property_expression("device");
             // bind obj->device->address to address_label->label
-            device.chain_property::<DeviceRowObject>("address")
+            device.chain_property::<DeviceRowObject>("alias") // it should be called "alias_label" but I don't feel like changing everything
                 .bind(&self.address_label.get(), "label", Widget::NONE);
 
             device.chain_property::<DeviceRowObject>("rssi")

@@ -73,6 +73,7 @@ impl MiBandWindow {
         // hide the header buttons
         self.imp().btn_back.set_visible(false);
         self.imp().btn_reload.set_visible(false);
+        self.set_all_titles("Mi Smart Band 4");
     }
 
     #[template_callback]
@@ -244,6 +245,7 @@ impl MiBandWindow {
         if let Some(band_mac) = self.imp().current_device.read().await.as_ref().map(|b| b.address.clone()){
             let band_conf = store.get_band(band_mac);
             band_conf.alias = Some(alias);
+            store.save().await?;
         }
         Ok(())
     }
@@ -397,8 +399,10 @@ impl MiBandWindow {
                         Some(DiscoveredDeviceEvent::DeviceAdded(device)) => {
                             // if we already have this device, skip the event
                             if shown_devices.contains_key(&device.path) { continue; }
+
+                            let alias = self.store().await?.lock().expect("can lock store").get_band_alias(&device.address).to_string();
                             
-                            let obj: DeviceRowObject = device.clone().into();
+                            let obj: DeviceRowObject = (device.clone(), alias).into();
                             // add it to the device list
                             self.devices().append(&obj);
                             // add it to our map
@@ -472,8 +476,11 @@ impl MiBandWindow {
         // get currently known devices
         let devices = MiBand::get_known_bands(&session).await?;
         let mut shown_devices = HashMap::new();
+        let store = self.store().await?.lock().expect("can lock store");
         for device in devices.into_iter() {
-            let obj: DeviceRowObject = device.clone().into();
+            // make sure to get the configured band alias
+            let alias = store.get_band_alias(&device.address).to_string();
+            let obj: DeviceRowObject = (device.clone(), alias).into();
             model.append(&obj);
             shown_devices.insert(device.path, obj);
         }
