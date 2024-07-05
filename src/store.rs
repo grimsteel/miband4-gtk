@@ -53,7 +53,7 @@ pub struct BandConf {
     pub auth_key: Option<String>,
 
     pub activity_goal: Option<ActivityGoal>,
-    //pub alias: Option<String>
+    pub alias: Option<String>
 }
 
 pub struct Store {
@@ -95,6 +95,10 @@ impl Store {
     }
     pub fn get_band(&mut self, band_mac: String) -> &mut BandConf {
         self.bands.entry(band_mac).or_default()
+    }
+    /// returns the band alias, or the mac address if there was no alias
+    pub fn get_band_alias<'a>(&'a self, band_mac: &'a str) -> &'a str {
+        self.bands.get(band_mac).and_then(|b| b.alias.as_ref()).map(|s| s.as_str()).unwrap_or(band_mac)
     }
 
     pub async fn save(&self) -> Result<()> {

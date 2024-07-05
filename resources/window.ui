@@ -94,7 +94,7 @@
                 <property name="row-spacing">12</property>
                 <property name="column-spacing">12</property>
                 <child>
-                  <object class="GtkLabel" id="address_label">
+                  <object class="GtkEditableLabel" id="address_label">
                     <property name="halign">GTK_ALIGN_START</property>
                     <property name="hexpand">true</property>
                     <style>

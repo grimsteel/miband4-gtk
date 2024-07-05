@@ -5,7 +5,7 @@ use async_lock::{OnceCell, RwLock};
 use chrono::Local;
 use futures::{pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
-    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
+    gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, EditableLabel, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 use log::error;
 use zbus::zvariant::OwnedObjectPath;
@@ -108,7 +108,6 @@ impl MiBandWindow {
             }
         }));
     }
-    
     #[template_callback]
     /// handles the click events for the buttons on the info cards
     fn handle_info_card_clicked(&self, id: String) {
@@ -206,7 +205,7 @@ impl MiBandWindow {
         }));
     }
 
-    async fn process_new_auth_key(&self, auth_key: String) -> band::Result<()> {
+   async fn process_new_auth_key(&self, auth_key: String) -> band::Result<()> {
         if let Some(device) = self.imp().current_device.write().await.as_mut() {
             // store this auth key
             let store = self.store().await?;
@@ -237,6 +236,15 @@ impl MiBandWindow {
             store_lock.get_band(device.address.clone()).activity_goal = Some(goal_config);
             store_lock.save().await?;
         };
+        Ok(())
+    }
+
+    async fn process_new_alias(&self, alias: String) -> store::Result<()> {
+        let mut store = self.store().await?.lock().expect("can lock store");
+        if let Some(band_mac) = self.imp().current_device.read().await.as_ref().map(|b| b.address.clone()){
+            let band_conf = store.get_band(band_mac);
+            band_conf.alias = Some(alias);
+        }
         Ok(())
     }
 
@@ -272,10 +280,15 @@ impl MiBandWindow {
 
     async fn reload_current_device(&self) -> band::Result<()> {
         let imp = self.imp();
-        if let Some(device) = imp.current_device.read().await.as_ref() {            
-            // display the band address
-            imp.address_label.set_label(&device.address);
-            self.set_all_titles(&format!("{} - Mi Band 4", device.address));
+        if let Some(device) = imp.current_device.read().await.as_ref() {
+            {
+                // display the band alias/name
+                let store = self.store().await?
+                    .lock().expect("can lock store");
+                let band_alias = store.get_band_alias(&device.address);
+                imp.address_label.set_text(band_alias);
+                self.set_all_titles(&format!("{} - Mi Band 4", band_alias));
+            }
 
             // if not connected, stop here
             if !device.is_connected().await { return Ok(()) }
@@ -299,6 +312,7 @@ impl MiBandWindow {
             ));
             imp.info_activity.apply_values(device.get_current_activity().await?);
 
+            // we need to lock the store again so that it's not held across await
             let mut store = self.store().await?
                 .lock()
                 .expect("can lock store");
@@ -475,6 +489,20 @@ impl MiBandWindow {
 
         self.setup_device_cards();
 
+        // device EditableLabel
+        self.imp().address_label.connect_editing_notify(clone!(@weak self as win => move |editable| {
+            // if they're not editing it anymore, save it
+            if !editable.is_editing() {
+                let contents = editable.text().as_str().to_string();
+                spawn_future_local(async move {
+                    if let Err(err) = win.process_new_alias(contents).await {
+                        win.show_error(&format!("Error while storing alias: {err}"));
+                    }
+                });
+                
+            }
+        }));
+
         Ok(())
     }
 
@@ -512,7 +540,7 @@ pub struct MiBandWindowImpl {
     #[template_child]
     btn_auth_key: TemplateChild<Button>,
     #[template_child]
-    address_label: TemplateChild<Label>,
+    address_label: TemplateChild<EditableLabel>,
     #[template_child]
     info_battery: TemplateChild<DeviceInfoCard>,
     #[template_child]
