@@ -14,6 +14,7 @@ const CHAR_STEPS: &'static str = "00000007-0000-3512-2118-0009af100700";
 const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
 const CHAR_SOFT_REV: &'static str = "00002a28-0000-1000-8000-00805f9b34fb";
 const CHAR_TIME: &'static str = "00002a2b-0000-1000-8000-00805f9b34fb";
+const CHAR_CONFIG: &'static str = "00000003-0000-3512-2118-0009af100700";
 
 #[derive(Debug)]
 struct BandChars<'a> {
@@ -21,7 +22,8 @@ struct BandChars<'a> {
     steps: GattCharacteristicProxy<'a>,
     firm_rev: GattCharacteristicProxy<'a>,
     time: GattCharacteristicProxy<'a>,
-    auth: GattCharacteristicProxy<'a>
+    auth: GattCharacteristicProxy<'a>,
+    config: GattCharacteristicProxy<'a>
 }
 
 #[derive(Debug)]
@@ -190,12 +192,13 @@ impl<'a> MiBand<'a> {
                     band_0.remove(CHAR_BATTERY),
                     band_0.remove(CHAR_STEPS),
                     band_0.remove(CHAR_TIME),
+                    band_1.remove(CHAR_CONFIG),
                     device_info.remove(CHAR_SOFT_REV),
                     band_1.remove(CHAR_AUTH)
                 ) {
-                    (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth)) => {
+                    (Some(battery), Some(steps), Some(time), Some(firm_rev), Some(auth), Some(config)) => {
                         let chars = BandChars {
-                            battery, steps, time, firm_rev, auth
+                            battery, steps, time, config, firm_rev, auth
                         };
 
                         return Ok(chars);
@@ -299,18 +302,15 @@ impl<'a> MiBand<'a> {
             let day_of_week = new_time.weekday().num_days_from_sunday() as u8;
             // year (two bytes), month, day, hour, minute, second, day of week, 3 zeros? (could be timezone)
             let value = vec![(year & 0xff) as u8, (year >> 8) as u8, new_time.month() as u8, new_time.day() as u8, new_time.hour() as u8, new_time.minute() as u8, new_time.second() as u8, day_of_week, 0, 0, 0];
-            let write_options = WriteOptions {
-                write_type: "request".into(),
-                prepare_authorize: true,
-                offset: 0
-            };
-            time.write_value(&value, &write_options).await?;
+            time.write_value_request(&value).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
     }
 
     /// get the current step count, meters walked, and calories burned
     pub async fn get_current_activity(&self) -> Result<CurrentActivity> {
+        if !self.authenticated { return Err(BandError::RequiresAuth) }
+        
         if let Some(BandChars { steps, .. }) = &self.chars {
             let value = steps.read_value_default().await?;
             let steps = (value[1] as u16) | ((value[2] as u16) << 8);
@@ -319,6 +319,22 @@ impl<'a> MiBand<'a> {
             Ok(CurrentActivity {
                 steps, meters, calories
             })
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    /// set the daily goal notification state + step count
+    pub async fn set_activity_goal(&self, notifications: bool, steps: u16) -> Result<()> {
+        if !self.authenticated { return Err(BandError::RequiresAuth) }
+        
+        if let Some(BandChars { config, .. }) = &self.chars {
+            // enable/disable notifications
+            let notifs_enabled_byte = if notifications { 0x01 } else { 0x00 };
+            config.write_value_command(&vec![0x06, 0x06, 0x00, notifs_enabled_byte]).await?;
+
+            // set the actual goal
+            let goal_payload = vec![0x10, 0x00, 0x00, (steps & 0xff) as u8, (steps >> 8) as u8, 0x00, 0x00];
+            config.write_value_request(&goal_payload).await;
+            Ok(())
         } else { Err(BandError::NotInitialized) }
     }
 
