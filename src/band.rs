@@ -9,6 +9,7 @@ use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDevic
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
 const SERVICE_DEVICE_INFO: &'static str = "0000180a-0000-1000-8000-00805f9b34fb";
+const SERVICE_NOTIFICATION: &'static str = "00001811-0000-1000-8000-00805f9b34fb";
 const CHAR_BATTERY: &'static str = "00000006-0000-3512-2118-0009af100700";
 const CHAR_STEPS: &'static str = "00000007-0000-3512-2118-0009af100700";
 const CHAR_AUTH: &'static str = "00000009-0000-3512-2118-0009af100700";
@@ -16,6 +17,7 @@ const CHAR_SOFT_REV: &'static str = "00002a28-0000-1000-8000-00805f9b34fb";
 const CHAR_TIME: &'static str = "00002a2b-0000-1000-8000-00805f9b34fb";
 const CHAR_CONFIG: &'static str = "00000003-0000-3512-2118-0009af100700";
 const CHAR_SETTINGS: &'static str = "00000008-0000-3512-2118-0009af100700";
+const CHAR_ALERT: &'static str = "00002a46-0000-1000-8000-00805f9b34fb";
 
 #[derive(Debug)]
 struct BandChars<'a> {
@@ -26,6 +28,7 @@ struct BandChars<'a> {
     auth: GattCharacteristicProxy<'a>,
     config: GattCharacteristicProxy<'a>,
     settings: GattCharacteristicProxy<'a>,
+    alert: GattCharacteristicProxy<'a>
 }
 
 #[derive(Debug)]
@@ -114,6 +117,20 @@ pub enum BandChangeEvent {
     Connected(bool)
 }
 
+#[derive(Copy, Clone)]
+pub enum AlertType {
+    Mail = 0x01,
+    Call = 0x03,
+    MissedCall = 0x04,
+    Message = 0x05
+}
+
+pub struct Alert<'a> {
+    pub alert_type: AlertType,
+    pub title: &'a str,
+    pub message: &'a str
+}
+
 // parse a time out of a 7 byte array
 fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
     if value.len() < 7 { return None }
@@ -186,9 +203,11 @@ impl<'a> MiBand<'a> {
         match (
             services.remove(SERVICE_BAND_0),
             services.remove(SERVICE_BAND_1),
-            services.remove(SERVICE_DEVICE_INFO)
+            services.remove(SERVICE_DEVICE_INFO),
+            services.remove(SERVICE_NOTIFICATION)
         ) {
-            (Some(mut band_0), Some(mut band_1), Some(mut device_info)) => {
+            
+            (Some(mut band_0), Some(mut band_1), Some(mut device_info), Some(mut notification)) => {
                 // get the characteristics from their respective services
                 match (
                     band_0.remove(CHAR_BATTERY),
@@ -197,11 +216,12 @@ impl<'a> MiBand<'a> {
                     band_0.remove(CHAR_CONFIG),
                     band_0.remove(CHAR_SETTINGS),
                     device_info.remove(CHAR_SOFT_REV),
-                    band_1.remove(CHAR_AUTH)
+                    band_1.remove(CHAR_AUTH),
+                    notification.remove(CHAR_ALERT)
                 ) {
-                    (Some(battery), Some(steps), Some(time), Some(config), Some(settings), Some(firm_rev), Some(auth)) => {
+                    (Some(battery), Some(steps), Some(time), Some(config), Some(settings), Some(firm_rev), Some(auth), Some(alert)) => {
                         let chars = BandChars {
-                            battery, steps, time, config, firm_rev, auth, settings
+                            battery, steps, time, config, firm_rev, auth, settings, alert
                         };
 
                         return Ok(chars);
@@ -341,11 +361,21 @@ impl<'a> MiBand<'a> {
         } else { Err(BandError::NotInitialized) }
     }
 
-    // firmware revision (software revision string)
+    /// firmware revision (software revision string)
     pub async fn get_firmware_revision(&self) -> Result<String> {
         if let Some(BandChars { firm_rev, .. }) = &self.chars {
             let value = firm_rev.read_value_default().await?;
             String::from_utf8(value).map_err(|_e| BandError::Utf8Error)
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    /// show a notification on the band
+    pub async fn send_alert(&self, alert_data: &Alert<'_>) -> Result<()> {
+        if let Some(BandChars { alert, .. }) = &self.chars {
+            let type_byte = alert_data.alert_type as u8;
+            let data = [&[type_byte, 0x01], alert_data.title.as_bytes(), alert_data.message.as_bytes()].concat();
+            alert.write_value_request(&data).await?;
+            Ok(())
         } else { Err(BandError::NotInitialized) }
     }
 
