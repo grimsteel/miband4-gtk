@@ -6,6 +6,7 @@ mod band;
 mod utils;
 mod bluez;
 mod store;
+mod notifications;
 mod ui;
 
 fn main() -> ExitCode {
