@@ -34,6 +34,23 @@ pub struct WriteOptions {
     pub prepare_authorize: bool
 }
 
+impl WriteOptions {
+    fn command() -> Self {
+        Self {
+            offset: 0,
+            write_type: "command".into(),
+            prepare_authorize: false
+        }
+    }
+    fn request() -> Self {
+        Self {
+            offset: 0,
+            write_type: "request".into(),
+            prepare_authorize: true
+        }
+    }
+}
+
 #[derive(DeserializeDict, SerializeDict, Type)]
 #[zvariant(signature = "dict")]
 pub struct BlankOptions {}
@@ -95,6 +112,14 @@ trait GattCharacteristic {
 impl<'a> GattCharacteristicProxy<'a> {
     pub async fn read_value_default(&self) -> zbus::Result<Vec<u8>> {
         self.read_value(&ReadOptions::default()).await
+    }
+
+    pub async fn write_value_request(&self, value: &[u8]) -> zbus::Result<()> {
+        self.write_value(value, &WriteOptions::request()).await
+    }
+
+    pub async fn write_value_command(&self, value: &[u8]) -> zbus::Result<()> {
+        self.write_value(value, &WriteOptions::command()).await
     }
 
     pub async fn acquire_write_stream(&self) -> zbus::Result<(UnixStream, u16)> {
