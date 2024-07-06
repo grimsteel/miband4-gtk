@@ -8,6 +8,7 @@ mod bluez;
 mod store;
 mod notifications;
 mod ui;
+mod mpris;
 
 fn main() -> ExitCode {
     resources_register_include!("resources.gresource").expect("failed to register resources");
