@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
-use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, store::{self, ActivityGoal}, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -131,11 +131,6 @@ pub struct Alert<'a> {
     pub alert_type: AlertType,
     pub title: &'a str,
     pub message: &'a str
-}
-
-pub struct BandLock<'a> {
-    pub pin: &'a str,
-    pub enabled: bool
 }
 
 // parse a time out of a 7 byte array
@@ -392,15 +387,13 @@ impl<'a> MiBand<'a> {
         } else { Err(BandError::NotInitialized) }
     }
 
-    pub async fn set_band_lock(&self, lock: &BandLock<'_>) -> Result<()> {
+    pub async fn set_band_lock(&self, lock: &BandLock) -> Result<()> {
         if let Some(BandChars { config, .. }) = &self.chars {
-            let pin_nums = lock.pin.chars().map(|s| s.to_digit(10)).collect::<Option<Vec<u32>>>().ok_or(BandError::InvalidLockPin)?;
             // make sure all digits are between 1-4
-            if pin_nums.len() != 4 || !pin_nums.iter().all(|&i| i >= 1 && i <= 4) { return Err(BandError::InvalidLockPin); }
-            let pin_nums: Vec<u8> = pin_nums.into_iter().map(|i| i as u8).collect();
+            if lock.pin.len() != 4 || !lock.pin.chars().all(|i| i >= '1' && i <= '4') { return Err(BandError::InvalidLockPin); }
             let data = [
                 &[0x06, 0x21, 0x00, if lock.enabled { 0x01 } else { 0x00 }],
-                &pin_nums[..],
+                &lock.pin.bytes().collect::<Vec<u8>>()[..],
                 &[0x00]
             ].concat();
             config.write_value_command(&data).await?;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Local};
 
-use crate::{band::{BatteryStatus, CurrentActivity, MiBand}, store::ActivityGoal, utils::{format_date, meters_to_imperial}};
+use crate::{band::{BatteryStatus, CurrentActivity, MiBand}, store::{ActivityGoal, BandLock}, utils::{format_date, meters_to_imperial}};
 
 use super::card::{InfoItem, InfoItemType, InfoItemValue, InfoItemValues};
 
@@ -34,6 +34,12 @@ pub const ACTIVITY_GOAL_ITEMS: [InfoItem<'static>; 3] = [
     InfoItem { item_type: InfoItemType::Entry, id: "steps", label: "Step Goal", classes: &[] },
     InfoItem { item_type: InfoItemType::Switch, id: "notifications", label: "Goal Notifications", classes: &[] },
     InfoItem { item_type: InfoItemType::Button, id: "save_goal", label: "Save", classes: &[] }
+];
+
+pub const BAND_LOCK_ITEMS: [InfoItem<'static>; 3] = [
+    InfoItem { item_type: InfoItemType::Switch, id: "lock_enabled", label: "Enable Band Lock", classes: &[] },
+    InfoItem { item_type: InfoItemType::Entry, id: "lock_pin", label: "Band PIN", classes: &[] },
+    InfoItem { item_type: InfoItemType::Button, id: "save_band_lock", label: "Save", classes: &[] }
 ];
 
 pub trait IntoInfoItemValues {
@@ -91,5 +97,45 @@ impl IntoInfoItemValues for &ActivityGoal {
             // always enabled
             ("save_goal".into(), InfoItemValue::Button(true))
         ])
+    }
+}
+
+impl From<InfoItemValues> for ActivityGoal {
+    fn from(values: InfoItemValues) -> Self {
+        Self {
+            steps: values.get("steps")
+            // get the steps value and parse it as a u16
+                .and_then(|v| if let InfoItemValue::Entry(val) = v { val.trim().parse().ok() } else { None })
+                .unwrap_or_default(),
+            notifications: values.get("notifications")
+            // get the bool out of the switch
+                .and_then(|v| if let InfoItemValue::Switch(val) = v { Some(*val) } else { None })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl IntoInfoItemValues for &BandLock {
+    fn into_info_item_values(self) -> InfoItemValues {
+        HashMap::from([
+            ("lock_enabled".into(), InfoItemValue::Switch(self.enabled)),
+            ("lock_pin".into(), InfoItemValue::Entry(self.pin.clone())),
+            ("save_band_lock".into(), InfoItemValue::Button(true))
+        ])
+    }
+}
+
+impl From<InfoItemValues> for BandLock {
+    fn from(values: InfoItemValues) -> Self {
+        Self {
+            enabled: values.get("lock_enabled")
+            // get the bool out of the switch
+                .and_then(|v| if let InfoItemValue::Switch(val) = v { Some(*val) } else { None })
+                .unwrap_or_default(),
+            pin: values.get("lock_pin")
+            // get the string out of the trny
+                .and_then(|v| if let InfoItemValue::Entry(val) = v { Some(val.clone()) } else { None })
+                .unwrap_or_default()
+        }
     }
 }

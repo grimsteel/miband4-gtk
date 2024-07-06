@@ -36,7 +36,7 @@ impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ActivityGoal {
     pub notifications: bool,
     pub steps: u16
@@ -48,11 +48,24 @@ impl Default for ActivityGoal {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BandLock {
+    pub pin: String,
+    pub enabled: bool
+}
+
+impl Default for BandLock {
+    fn default() -> Self {
+        Self { pin: "1234".into(), enabled: false }
+    }
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct BandConf {
     pub auth_key: Option<String>,
 
     pub activity_goal: Option<ActivityGoal>,
+    pub band_lock: Option<BandLock>,
     pub alias: Option<String>
 }
 

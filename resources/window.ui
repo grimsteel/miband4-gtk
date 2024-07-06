@@ -168,6 +168,16 @@
                     </layout>
                   </object>
                 </child>
+
+                <child>
+                  <object class="MiBand4DeviceInfoCard" id="info_band_lock">
+                    <signal name="button-clicked" handler="handle_info_card_clicked" swapped="true" />
+                    <layout>
+                      <property name="column">1</property>
+                      <property name="row">2</property>
+                    </layout>
+                  </object>
+                </child>
               </object>
             </property>
           </object>
