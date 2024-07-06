@@ -42,6 +42,7 @@ pub enum BandError {
     Utf8Error,
     RequiresAuth,
     InvalidAuthKey,
+    InvalidLockPin,
     //Failed,
     //UnknownError
 }
@@ -77,6 +78,7 @@ impl Display for BandError {
             Self::Utf8Error => write!(f, "Device sent invalid UTF-8 text"),
             Self::RequiresAuth => write!(f, "The operation requires authentication"),
             Self::InvalidAuthKey => write!(f, "Invalid auth key"),
+            Self::InvalidLockPin => write!(f, "Invalid band lock PIN (must be 4 digits from 1-4)"),
             //Self::Failed => write!(f, "The operation failed"),
             //Self::UnknownError => write!(f, "An unknown error occurred")
         }
@@ -129,6 +131,11 @@ pub struct Alert<'a> {
     pub alert_type: AlertType,
     pub title: &'a str,
     pub message: &'a str
+}
+
+pub struct BandLock<'a> {
+    pub pin: &'a str,
+    pub enabled: bool
 }
 
 // parse a time out of a 7 byte array
@@ -381,6 +388,22 @@ impl<'a> MiBand<'a> {
                 &[0x00]
             ].concat();
             alert.write_value_request(&data).await?;
+            Ok(())
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    pub async fn set_band_lock(&self, lock: &BandLock<'_>) -> Result<()> {
+        if let Some(BandChars { config, .. }) = &self.chars {
+            let pin_nums = lock.pin.chars().map(|s| s.to_digit(10)).collect::<Option<Vec<u32>>>().ok_or(BandError::InvalidLockPin)?;
+            // make sure all digits are between 1-4
+            if pin_nums.len() != 4 || !pin_nums.iter().all(|&i| i >= 1 && i <= 4) { return Err(BandError::InvalidLockPin); }
+            let pin_nums: Vec<u8> = pin_nums.into_iter().map(|i| i as u8).collect();
+            let data = [
+                &[0x06, 0x21, 0x00, if lock.enabled { 0x01 } else { 0x00 }],
+                &pin_nums[..],
+                &[0x00]
+            ].concat();
+            config.write_value_command(&data).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
     }
