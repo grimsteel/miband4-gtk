@@ -33,9 +33,9 @@ impl Error for NotificationParseError {}
 
 #[derive(Debug, Clone)]
 pub struct Notification {
-    app: String,
-    summary: String,
-    body: String
+    pub app: String,
+    pub summary: String,
+    pub body: String
 }
 
 impl TryFrom<Message> for Notification {
@@ -98,14 +98,4 @@ pub async fn stream_notifications() -> zbus::Result<impl Stream<Item = Notificat
             }
         }
     }))
-}
-
-#[test]
-fn random_test() {
-    let ctx = gtk::glib::MainContext::new();
-    ctx.block_on(async {
-        stream_notifications().await.unwrap().for_each(|item| async move {
-            println!("item {item:?}");
-        }).await;
-    });
 }

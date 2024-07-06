@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::Mutex, time::Duration};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::{Mutex, Once}, time::Duration};
 
 use async_io::Timer;
 use async_lock::{OnceCell, RwLock};
@@ -10,7 +10,7 @@ use gtk::{
 use log::error;
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{band::{self, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, store::{self, ActivityGoal, Store}, utils::decode_hex};
+use crate::{band::{self, Alert, AlertType, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, notifications::stream_notifications, store::{self, ActivityGoal, Store}, utils::decode_hex};
 
 use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::{DeviceInfoCard, InfoItemValue}, card_implementations::{ACTIVITY_GOAL_ITEMS, ACTIVITY_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
@@ -359,6 +359,8 @@ impl MiBandWindow {
         imp.btn_back.set_visible(true);
         imp.btn_reload.set_visible(true);
         self.reload_current_device().await?;
+
+        self.forward_notifications();
         
         Ok(())
     }
@@ -370,6 +372,42 @@ impl MiBandWindow {
         imp.info_device.handle_items(&DEVICE_INFO_ITEMS);
         imp.info_activity.handle_items(&ACTIVITY_ITEMS);
         imp.info_activity_goal.handle_items(&ACTIVITY_GOAL_ITEMS);
+    }
+
+    /// forwards notifs from org.freedesktop.Notifications to the current band
+    /// if this has already been called before, it does nothing
+    fn forward_notifications(&self) {
+        static START: Once = Once::new();
+        START.call_once(|| {
+            spawn_future_local(clone!(@weak self as win => async move {
+                match stream_notifications().await {
+                    Ok(stream) => {
+                        stream.for_each(|notif| {
+                            let win = win.clone();
+                            async move {
+                                // make sure there is a current band
+                                if let Some(band) = win.imp().current_device.read().await.as_ref() {
+                                    // create the alert message
+                                    let alert = Alert {
+                                        alert_type: AlertType::Message,
+                                        title: &notif.app,
+                                        message: &format!("{} - {}", notif.summary, notif.body)
+                                    };
+                                    // send it to the band
+                                    if let Err(err) = band.send_alert(&alert).await {
+                                        win.show_error(&format!("An error occurred while sending a notification to the band: {err}"));
+                                    }
+                                }
+                            }
+                        }).await;
+                    },
+                    // display any errors that occur
+                    Err(err) => {
+                        win.show_error(&format!("An error occurred while starting to forward notifications to the band: {err}"))
+                    }
+                }
+            }));
+        });
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {

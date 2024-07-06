@@ -373,7 +373,13 @@ impl<'a> MiBand<'a> {
     pub async fn send_alert(&self, alert_data: &Alert<'_>) -> Result<()> {
         if let Some(BandChars { alert, .. }) = &self.chars {
             let type_byte = alert_data.alert_type as u8;
-            let data = [&[type_byte, 0x01], alert_data.title.as_bytes(), alert_data.message.as_bytes()].concat();
+            let data = [
+                &[type_byte, 0x01],
+                alert_data.title.as_bytes(),
+                &[0x00],
+                alert_data.message.as_bytes(),
+                &[0x00]
+            ].concat();
             alert.write_value_request(&data).await?;
             Ok(())
         } else { Err(BandError::NotInitialized) }
