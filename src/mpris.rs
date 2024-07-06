@@ -1,17 +1,18 @@
-use zbus::{fdo::{DBusProxy, PropertiesProxy}, names::{BusName, OwnedBusName, WellKnownName}, proxy, Connection};
-use futures::{stream::StreamExt, select, pin_mut};
-use async_lock::RwLock;
+use std::collections::HashMap;
+
+use zbus::{proxy, Connection, zvariant::Value};
+use futures::{channel::mpsc::Sender, pin_mut, select, stream::StreamExt, SinkExt};
 
 use log::debug;
 
-#[proxy(default_path = "/org/mpris/MediaPlayer2", interface = "org.mpris.MediaPlayer2.Player", gen_blocking = false)]
+#[proxy(default_path = "/org/mpris/MediaPlayer2", interface = "org.mpris.MediaPlayer2.Player", gen_blocking = false, default_service = "org.mpris.MediaPlayer2.playerctld")]
 trait MediaPlayer {
     fn play_pause(&self) -> zbus::Result<()>;
     fn next(&self) -> zbus::Result<()>;
     fn previous(&self) -> zbus::Result<()>;
 
     #[zbus(property)]
-    fn metadata(&self) -> zbus::Result<String>;
+    fn metadata(&self) -> zbus::Result<HashMap<String, Value>>;
     #[zbus(property)]
     fn volume(&self) -> zbus::Result<f64>;
     #[zbus(property)]
@@ -22,111 +23,75 @@ trait MediaPlayer {
     fn playback_status(&self) -> zbus::Result<String>;
 }
 
-pub struct MprisController<'a> {
-    conn: Connection,
-    dbus: DBusProxy<'a>,
-    current_player: RwLock<Option<MediaPlayerProxy<'a>>>,
+#[proxy(default_path = "/org/mpris/MediaPlayer2", interface = "com.github.altdesktop.playerctld", gen_blocking = false, default_service = "org.mpris.MediaPlayer2.playerctld")]
+trait PlayerCtlD {
+    #[zbus(property)]
+    fn player_names(&self) -> zbus::Result<Vec<String>>;
 }
 
-pub struct MediaStatus {
-    track: String,
-    volume: u8,
-    position: u8,
-    duration: u8,
-    state: u8
+pub struct MprisController<'a> {
+    conn: Connection,
+    player_proxy: MediaPlayerProxy<'a>,
+    playerctl_proxy: PlayerCtlDProxy<'a>
+}
+
+#[derive(Debug)]
+pub enum MediaState {
+    Playing,
+    Paused,
+    Stopped
+}
+
+#[derive(Debug)]
+pub struct MediaInfo {
+    pub track: String,
+    pub volume: f64,
+    pub position: i64,
+    pub duration: i64,
+    pub state: MediaState
 }
 
 impl<'a> MprisController<'a> {
     pub async fn init() -> zbus::Result<Self> {
         let conn = Connection::session().await?;
-        let dbus_proxy = DBusProxy::new(&conn).await?;
+        let player_proxy = MediaPlayerProxy::new(&conn).await?;
+        let playerctl_proxy = PlayerCtlDProxy::new(&conn).await?;
         Ok(Self {
             conn,
-            dbus: dbus_proxy,
-            current_player: RwLock::new(None)
+            player_proxy,
+            playerctl_proxy
         })
     }
 
-    async fn get_first_player<'b>(&self) -> zbus::Result<Option<MediaPlayerProxy<'b>>> {
-        let bus_names: Vec<OwnedBusName> = self.dbus.list_names().await?;
-
-        //let mut player = self.current_player.write().expect("can write to current player");
-        
-        // For right now, just use the first one
-        Ok(if let Some(mpris_bus_name) = bus_names
-            .into_iter()
-            .filter(|name| name.starts_with("org.mpris.MediaPlayer2"))
-            .next()
-        {
-            Some(MediaPlayerProxy::new(&self.conn, mpris_bus_name).await?)
-        } else {
-            None
-        })
-    }
-
-    pub async fn watch_changes(&self) -> zbus::Result<()> {
+    pub async fn watch_changes(&self, mut tx: Sender<Option<MediaInfo>>) -> zbus::Result<()> {
         // update the current player
-        *self.current_player.write().await = self.get_first_player().await?;
-        
-        loop {
-            let current_player = self.current_player.read().await;
-            let new_player = if let Some(player) = current_player.as_ref() {
-                let player_name = player.0.destination().to_owned();
+        //*self.current_player.write().await = self.get_first_player().await?;
+        let mut players_stream = self.playerctl_proxy.receive_player_names_changed().await.fuse();
 
-                // wait for this player to disappear from the bus
-                let mut player_gone = self.dbus
-                    .receive_name_owner_changed_with_args(&[
-                        (0, player_name.as_str()), // name = our current player
-                        (2, "") // new_owner = None
-                    ]).await?.fuse();
-
-                let properties_proxy = PropertiesProxy::new(&self.conn, player_name, "/org/mpris/MediaPlayer2")
-                    .await?;
-
-                let mut properties_changed = properties_proxy.receive_properties_changed_with_args(&[
-                    (0, "org.mpris.MediaPlayer2.Player")
-                ]).await?.fuse();
-
-                loop {
-                    // but also listen to changes
-                    select! {
-                        _ = player_gone.next() => {
-                            // if the player disappeared, stop
-                            debug!("player gone");
-                            break;
-                        },
-                        e = properties_changed.next() => {
-                            let args = e.as_ref().unwrap().args();
-                            debug!("args {:?}", args);
-                        }
-                    };
-                }
-                self.get_first_player().await?
+        while let Some(players) = players_stream.next().await {
+            let players = players.get().await?;
+            if players.len() == 0 {
+                let _ = tx.send(None).await;
             } else {
-                // wait for a name to be acquired on the bus before continuing
-                let new_player_stream = self.dbus.receive_name_owner_changed().await?
-                    .filter_map(|e| async move {
-                        let args = e.args().ok()?;
-                        // wait for a new MPRIS player
-                        if let BusName::WellKnown(name) = args.name {
-                            //                                            make sure there's actually an owner here
-                            if name.starts_with("org.mpris.MediaPlayer2") && args.new_owner.is_some() {
-                                return Some(name.into_owned());
-                            }
-                        }
-                        None
-                    });
-                pin_mut!(new_player_stream);
-                let new_player: WellKnownName = new_player_stream.next().await.expect("stream never ends");
+                let metadata = self.player_proxy.metadata().await?;
+                let title = metadata.get("xesam:title").and_then(|s| s.downcast_ref().ok()).unwrap_or("Unknown title");
+                let duration_micros: i64 = metadata.get("mpris:length").and_then(|s| s.downcast_ref().ok()).unwrap_or_default();
+                // optional
+                let position_micros = self.player_proxy.position().await.unwrap_or_default();
+                // optional
+                let volume = self.player_proxy.volume().await.unwrap_or_default();
+                let state = self.player_proxy.playback_status().await?;
+                let state = match state.as_str() {
+                    "Playing" => MediaState::Playing,
+                    "Paused" => MediaState::Paused,
+                    _ => MediaState::Stopped
+                };
+                let item = MediaInfo { track: title.into(), volume, position: position_micros, duration: duration_micros, state };
+                let _ = tx.send(Some(item)).await;
+            }
+        }
 
-                let proxy = MediaPlayerProxy::new(&self.conn, new_player).await?;
-
-                Some(proxy)
-            };
-
-            // update with the new player
-            *self.current_player.write().await = new_player;
-        };
+        Ok(())
     }
 }
 
@@ -135,7 +100,13 @@ fn test_asd() {
     env_logger::init();
     let context = gtk::glib::MainContext::new();
     context.block_on(async {
-        let controller = MprisController::init().await.unwrap();
-        controller.watch_changes().await.unwrap();
+        let (tx, rx) = futures::channel::mpsc::channel(1);
+        context.spawn_local(async move {
+            let controller = MprisController::init().await.unwrap();
+            controller.watch_changes(tx).await.unwrap();
+        });
+        rx.for_each(|item| async move {
+            println!("item : {item:?}");
+        }).await;
     });
 }
