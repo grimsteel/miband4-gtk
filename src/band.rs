@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
-use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, mpris::MediaInfo, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, mpris::{MediaInfo, MediaState}, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -317,7 +317,7 @@ impl<'a> MiBand<'a> {
 
             // write all of the chunks
             for chunk in processed_chunks {
-                chunked_transfer.write_value_request(&chunk).await?;
+                chunked_transfer.write_value_command(&chunk).await?;
             }
             Ok(())
         } else { Err(BandError::NotInitialized) }
@@ -435,9 +435,37 @@ impl<'a> MiBand<'a> {
 
     pub async fn set_media_info(&self, media: &Option<MediaInfo>) -> Result<()> {
         if let Some(media) = media {
-            // TODO: build buffer
+            let pos = media.position.unwrap_or_default();
+            let all_fields = [
+                // always include the position (even if it's just [0x00, 0x00])
+                (0x00u8, Some(vec![(pos & 0xff) as u8, (pos > 8) as u8])),
+                // track + null term
+                (0x08u8, media.track.as_ref().map(|b| [b.as_bytes(), &[0x00]].concat())),
+                // big endian duration + volume
+                (0x10u8, media.duration.map(|d| vec![(d & 0xff) as u8, (d > 8) as u8])),
+                (0x40u8, media.volume.map(|d| vec![(d & 0xff) as u8, (d > 8) as u8]))
+            ];
+            let (flags, bufs): (Vec<u8>, Vec<Vec<u8>>) = all_fields.into_iter()
+                .filter_map(|(flag, buf)| {
+                    // basically filter out the `None`s
+                    Some((flag, buf?))
+                })
+                .unzip();
+
+            // OR all of the flags together with 0x01
+            let flag = flags.into_iter().fold(0x01, |acc, f| acc | f);
+            let buf = bufs.concat();
+
+            let buf = [
+                &[flag, if media.state == MediaState::Playing { 0 } else { 1 }, 0x00],
+                &buf[..]
+            ].concat();
+
+            println!("full buf: {buf:?}");
+
+            self.write_chunked(0x03, &buf).await
         } else {
-            self.write_chunked(0x03, &[0x00, 0x00, 0x00, 0x00, 0x00]);
+            self.write_chunked(0x03, &vec![0x00; 5]).await
         }
     }
 

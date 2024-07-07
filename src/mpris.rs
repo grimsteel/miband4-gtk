@@ -33,7 +33,7 @@ pub struct MprisController<'a> {
     playerctl_proxy: PlayerCtlDProxy<'a>
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum MediaState {
     Playing,
     Paused,
