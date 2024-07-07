@@ -18,6 +18,7 @@ const CHAR_TIME: &'static str = "00002a2b-0000-1000-8000-00805f9b34fb";
 const CHAR_CONFIG: &'static str = "00000003-0000-3512-2118-0009af100700";
 const CHAR_SETTINGS: &'static str = "00000008-0000-3512-2118-0009af100700";
 const CHAR_ALERT: &'static str = "00002a46-0000-1000-8000-00805f9b34fb";
+const CHAR_CHUNKED_TRANSFER: &'static str = "00000020-0000-3512-2118-0009af100700";
 
 #[derive(Debug)]
 struct BandChars<'a> {
@@ -28,7 +29,8 @@ struct BandChars<'a> {
     auth: GattCharacteristicProxy<'a>,
     config: GattCharacteristicProxy<'a>,
     settings: GattCharacteristicProxy<'a>,
-    alert: GattCharacteristicProxy<'a>
+    alert: GattCharacteristicProxy<'a>,
+    chunked_transfer: GattCharacteristicProxy<'a>
 }
 
 #[derive(Debug)]
@@ -217,13 +219,14 @@ impl<'a> MiBand<'a> {
                     band_0.remove(CHAR_TIME),
                     band_0.remove(CHAR_CONFIG),
                     band_0.remove(CHAR_SETTINGS),
+                    band_0.remove(CHAR_CHUNKED_TRANSFER),
                     device_info.remove(CHAR_SOFT_REV),
                     band_1.remove(CHAR_AUTH),
                     notification.remove(CHAR_ALERT)
                 ) {
-                    (Some(battery), Some(steps), Some(time), Some(config), Some(settings), Some(firm_rev), Some(auth), Some(alert)) => {
+                    (Some(battery), Some(steps), Some(time), Some(config), Some(settings), Some(chunked_transfer), Some(firm_rev), Some(auth), Some(alert)) => {
                         let chars = BandChars {
-                            battery, steps, time, config, firm_rev, auth, settings, alert
+                            battery, steps, time, config, firm_rev, auth, settings, alert, chunked_transfer
                         };
 
                         return Ok(chars);
@@ -288,6 +291,35 @@ impl<'a> MiBand<'a> {
                     }
                 }
             }
+        } else { Err(BandError::NotInitialized) }
+    }
+
+    /// chunked data transfer for longer payloads
+    async fn write_chunked(&self, message_type: u8, payload: &[u8]) -> Result<()> {
+        const CHUNK_LENGTH: usize = 17;
+        if let Some(BandChars { chunked_transfer, .. }) = &self.chars {
+            let chunks = payload.chunks(CHUNK_LENGTH).enumerate();
+            let num_chunks = chunks.len();
+            let processed_chunks: Vec<_> = chunks.map(|(i, chunk)| {
+                let flag = match (i == 0, i == num_chunks - 1) {
+                    // first and last chunk
+                    (true, true) => 0x40 | 0x80,
+                    // first chunk
+                    (true, false) => 0,
+                    // last chunk
+                    (false, true) => 0x80,
+                    // middle chunk
+                    (false, false) => 0x40
+                } | message_type;
+                // 0x00 <flag> <num chunks> <data...>
+                [&[0x00, flag, (num_chunks & 0xff) as u8], chunk].concat()
+            }).collect();
+
+            // write all of the chunks
+            for chunk in processed_chunks {
+                chunked_transfer.write_value_request(&chunk).await?;
+            }
+            Ok(())
         } else { Err(BandError::NotInitialized) }
     }
 
