@@ -89,8 +89,6 @@ impl<'a> MprisController<'a> {
 
         let _ = tx.send(None).await;
 
-        let mut last_sent = Instant::now();
-
         // wait for at least one player to start before proceeding
         while let Some(false) = players_stream.next().await {}
 
@@ -109,7 +107,7 @@ impl<'a> MprisController<'a> {
 
         let mut need_send = false;
 
-        let mut timer = Timer::interval(STREAM_THROTTLE).fuse();
+        let mut debounce_timer = Timer::after(STREAM_THROTTLE).fuse();
 
         loop {
             select! {
@@ -168,23 +166,26 @@ impl<'a> MprisController<'a> {
                     current_media_info.position = self.player_proxy.position().await.ok().and_then(|p| p.try_into().ok());
                     need_send = true;
                 },
-                _ = timer.next() => {}
+                _ = debounce_timer.next() => {
+                    println!("debounce timer fired");
+                    if tx.send(
+                        if players_exist {
+                            Some(current_media_info.clone())
+                        } else {
+                            None
+                        }).await.is_err()
+                    {
+                        break
+                    } else {
+                        need_send = false;
+                    }
+                }
             };
 
-            // If the last sent was more than 100 ms ago, send a new one
-            if last_sent.elapsed() > STREAM_THROTTLE && need_send {
-                if tx.send(
-                    if players_exist {
-                        Some(current_media_info.clone())
-                    } else {
-                        None
-                    }).await.is_err()
-                {
-                    break
-                } else {
-                    last_sent = Instant::now();
-                    need_send = false;
-                }
+            // Reset the debounce timer
+            if need_send {
+                debounce_timer.get_mut().set_after(STREAM_THROTTLE);
+                println!("reset debounce timer");
             }
         }
 
