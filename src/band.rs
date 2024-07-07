@@ -1,8 +1,8 @@
-use std::{error::Error, fmt::Display, io};
+use std::{error::Error, fmt::Display, io, pin::Pin, task::{Context, Poll}};
 
 use async_net::unix::UnixStream;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use futures::{channel::mpsc::Sender, stream::select, AsyncRead, AsyncReadExt, AsyncWriteExt, SinkExt, Stream, StreamExt};
+use futures::{stream::select, AsyncRead, AsyncReadExt, AsyncWriteExt, Stream, StreamExt};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
 use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, mpris::{MediaInfo, MediaState}, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
@@ -151,6 +151,8 @@ pub enum MusicEvent {
     VolumeDown
 }
 
+
+/// A `Stream` implementation for music events from a band
 #[derive(Debug)]
 pub struct MusicEventListener {
     notify_stream: UnixStream,
@@ -160,19 +162,38 @@ pub struct MusicEventListener {
 impl Stream for MusicEventListener {
     type Item = MusicEvent;
 
-    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut buf = vec![0; self.mtu];
-        let result = std::pin::Pin::new(&mut self.get_mut().notify_stream).poll_read(cx, &mut buf);
-        result.map(move |value| {
-            let size = value.ok()?;
+        let result = Pin::new(&mut self.get_mut().notify_stream).poll_read(cx, &mut buf);
+        let result = result.map(move |value| -> io::Result<Option<MusicEvent>> {
+            // when this function returns an Err, that means the stream must end
+            let size = value?;
             let buf = &buf[..size];
-            println!("buf: {buf:?}");
-            Some(MusicEvent::Next)
-        })
+            // Ok(None) means we don't recognize the data it gave us
+            if size < 2 { return Ok(None) }
+            Ok(match buf[1] {
+                0xe0 => Some(MusicEvent::Open),
+                0xe1 => Some(MusicEvent::Close),
+                d => {
+                    println!("{d}");
+                    None
+                }
+            })
+        });
+
+        match result {
+            Poll::Ready(Ok(Some(v))) => Poll::Ready(Some(v)),
+            // fatal - stream must end
+            Poll::Ready(Err(_)) => Poll::Ready(None),
+            // the band sent data we don't recognize, but it's not fatal
+            // we just don't have data to send
+            Poll::Ready(Ok(None)) => Poll::Pending,
+            Poll::Pending => Poll::Pending
+        }
     }
 }
 
-// parse a time out of a 7 byte array
+/// parse a time out of a 7 byte array
 fn parse_time(value: &[u8]) -> Option<DateTime<Local>> {
     if value.len() < 7 { return None }
     
@@ -506,11 +527,9 @@ impl<'a> MiBand<'a> {
             let buf = bufs.concat();
 
             let buf = [
-                &[flag, if media.state == MediaState::Playing { 0 } else { 1 }, 0x00],
+                &[flag, if media.state == MediaState::Playing { 1 } else { 0 }, 0x00],
                 &buf[..]
             ].concat();
-
-            println!("full buf: {buf:?}");
 
             self.write_chunked(0x03, &buf).await
         } else {
@@ -519,19 +538,10 @@ impl<'a> MiBand<'a> {
     }
 
     /// listen for the media button presses
-    pub async fn stream_media_button_events(&self, mut tx: Sender<MusicEvent>) -> Result<()> {
+    pub async fn stream_media_button_events(&self) -> Result<MusicEventListener> {
         if let Some(BandChars { music_notifs, .. }) = &self.chars {
-            let (mut notify, notify_mtu) = music_notifs.acquire_notify_stream().await?;
-            let mut buf = vec![0; notify_mtu as usize];
-
-            loop {
-                let len = notify.read(&mut buf).await?;
-                println!("len: {len}, buf: {:?}", &buf[..len]);
-                if tx.send(MusicEvent::Open).await.is_err() {
-                    break;
-                }
-            }
-            Ok(())
+            let (notify_stream, mtu) = music_notifs.acquire_notify_stream().await?;
+            Ok(MusicEventListener { notify_stream, mtu: mtu as usize })
         } else { Err(BandError::NotInitialized) }
     }
 

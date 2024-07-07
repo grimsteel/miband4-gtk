@@ -1054,6 +1054,7 @@ name = "miband4-gtk"
 version = "0.2.0"
 dependencies = [
  "aes",
+ "async-channel",
  "async-fs",
  "async-io",
  "async-lock",

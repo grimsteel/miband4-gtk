@@ -140,6 +140,7 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
             event = controller_rx.next() => {
                 // the position doesn't refresh automatically
                 current_media_info.position = player_proxy.position().await.ok().and_then(|p| p.try_into().ok());
+                println!("got an event {event:?}");
 
                 match event {
                     Some(MusicEvent::Open) => {

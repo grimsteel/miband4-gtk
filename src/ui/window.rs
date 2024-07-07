@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::{Mutex, Once}, t
 use async_io::Timer;
 use async_lock::{OnceCell, RwLock};
 use chrono::Local;
-use futures::{channel::mpsc::{self, Sender}, pin_mut, select, stream::SelectAll, StreamExt};
+use futures::{channel::mpsc::{self, Sender}, pin_mut, select, stream::SelectAll, SinkExt, StreamExt};
 use gtk::{
     gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, EditableLabel, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
@@ -351,6 +351,12 @@ impl MiBandWindow {
     /// disconnects from the old connected band
     async fn set_new_band(&self, device: DiscoveredDevice) -> band::Result<()> {
         let imp = self.imp();
+
+        let mut band_closed = imp.band_closed.borrow_mut();
+        // close up the last band
+        if let Some((tx, _rx)) = band_closed.replace(async_channel::bounded(1)) {
+            let _ = tx.send(()).await;
+        }
         
         // connect to the band and store it
         let mut band = MiBand::from_discovered_device(self.session().await?.clone(), device).await?;
@@ -377,7 +383,7 @@ impl MiBandWindow {
         self.reload_current_device().await?;
 
         self.forward_notifications();
-        self.forward_media();
+        self.start_band_media();
         
         Ok(())
     }
@@ -428,9 +434,9 @@ impl MiBandWindow {
         });
     }
     
-    /// forwards the MPRIS state to the band
+    /// gets an MPRIS controller
     /// if this has already been called before, it returns the existing instance
-    async fn forward_media(&self) -> &Sender<MusicEvent> {
+    async fn get_mpris_controller(&self) -> Sender<MusicEvent> {
         static CONTROLLER: OnceCell<Sender<MusicEvent>> = OnceCell::new();
         CONTROLLER.get_or_init(|| async {
             let (mpris_tx, mut mpris_rx) = mpsc::channel(1);
@@ -443,6 +449,7 @@ impl MiBandWindow {
                     // make sure there is a current band
                     if let Some(band) = win.imp().current_device.read().await.as_ref() {
                         // send it to the band
+                        println!("sent {:?} to the band", item);
                         if let Err(err) = band.set_media_info(&item).await {
                             win.show_error(&format!("An error occurred while setting the media state: {err}"));
                         }
@@ -450,7 +457,47 @@ impl MiBandWindow {
                 }
             }));
             controller_tx
-        }).await
+        }).await.clone()
+    }
+
+    fn start_band_media(&self) {
+        spawn_future_local(clone!(@weak self as win => async move {
+            // get the Receiver for when the band is closed
+            let band_closed_rx = win.imp().band_closed.borrow().as_ref().map(|a| a.1.clone());
+            // get the current band
+            let band = win.imp().current_device.read().await;
+            if let Some((band_closed_rx, band)) = band_closed_rx.zip(band.as_ref()) {
+                // start listening to the media button events
+                match band.stream_media_button_events().await.map(|s| s.fuse()) {
+                    Ok(mut music_events) => {
+                        let mut mpris_controller_tx = win.get_mpris_controller().await;
+                        pin_mut!(band_closed_rx);
+                        loop {
+                            select! {
+                                // stop watching for events
+                                _ = band_closed_rx.next() => {
+                                    break;
+                                },
+                                event = music_events.next() => {
+                                    if let Some(event) = event {
+                                        println!("music event: {:?}", event);
+                                        if mpris_controller_tx.send(event).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        println!("stopped media");
+                    },
+                    Err(err) => {
+                        win.show_error(&format!("Error while starting the band media: {err}"));
+                    }
+                }
+            } else {
+                win.show_error("Error while starting the band media: no band found");
+            }
+        }));
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
@@ -647,6 +694,7 @@ pub struct MiBandWindowImpl {
     auth_key_dialog: TemplateChild<AuthKeyDialog>,
     
     devices: RefCell<Option<ListStore>>,
+    band_closed: RefCell<Option<(async_channel::Sender<()>, async_channel::Receiver<()>)>>,
     current_device: RwLock<Option<MiBand<'static>>>
 }
 
