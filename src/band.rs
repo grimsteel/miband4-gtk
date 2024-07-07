@@ -1,7 +1,8 @@
 use std::{error::Error, fmt::Display, io};
 
+use async_net::unix::UnixStream;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
+use futures::{channel::mpsc::Sender, stream::select, AsyncRead, AsyncReadExt, AsyncWriteExt, SinkExt, Stream, StreamExt};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
 use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, mpris::{MediaInfo, MediaState}, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
@@ -135,6 +136,40 @@ pub struct Alert<'a> {
     pub alert_type: AlertType,
     pub title: &'a str,
     pub message: &'a str
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum MusicEvent {
+    // open/close the music screen on the band
+    Open,
+    Close,
+
+    PlayPause,
+    Next,
+    Previous,
+    VolumeUp,
+    VolumeDown
+}
+
+#[derive(Debug)]
+pub struct MusicEventListener {
+    notify_stream: UnixStream,
+    mtu: usize
+}
+
+impl Stream for MusicEventListener {
+    type Item = MusicEvent;
+
+    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        let mut buf = vec![0; self.mtu];
+        let result = std::pin::Pin::new(&mut self.get_mut().notify_stream).poll_read(cx, &mut buf);
+        result.map(move |value| {
+            let size = value.ok()?;
+            let buf = &buf[..size];
+            println!("buf: {buf:?}");
+            Some(MusicEvent::Next)
+        })
+    }
 }
 
 // parse a time out of a 7 byte array

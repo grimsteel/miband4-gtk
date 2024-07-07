@@ -3,14 +3,14 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, sync::{Mutex, Once}, t
 use async_io::Timer;
 use async_lock::{OnceCell, RwLock};
 use chrono::Local;
-use futures::{channel::mpsc, pin_mut, select, stream::SelectAll, StreamExt};
+use futures::{channel::mpsc::{self, Sender}, pin_mut, select, stream::SelectAll, StreamExt};
 use gtk::{
     gio::{ActionGroup, ActionMap, ListStore}, glib::{self, clone, object_subclass, spawn_future_local, subclass::InitializingObject, Object}, prelude::*, subclass::prelude::*, template_callbacks, Accessible, AlertDialog, Application, ApplicationWindow, Buildable, Button, CompositeTemplate, ConstraintTarget, EditableLabel, Label, ListItem, ListView, Native, NoSelection, Root, ShortcutManager, SignalListItemFactory, Stack, Widget, Window
 };
 use log::error;
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{band::{self, Alert, AlertType, BandChangeEvent, BandError, MiBand}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, mpris::MprisController, notifications::stream_notifications, store::{self, ActivityGoal, BandLock, Store}, utils::decode_hex};
+use crate::{band::{self, Alert, AlertType, BandChangeEvent, BandError, MiBand, MusicEvent}, bluez::{BluezSession, DiscoveredDevice, DiscoveredDeviceEvent}, mpris::watch_mpris, notifications::stream_notifications, store::{self, ActivityGoal, BandLock, Store}, utils::decode_hex};
 
 use super::{auth_key_dialog::AuthKeyDialog, device_info::{card::DeviceInfoCard, card_implementations::{ACTIVITY_GOAL_ITEMS, ACTIVITY_ITEMS, BAND_LOCK_ITEMS, BATTERY_ITEMS, DEVICE_INFO_ITEMS, TIME_ITEMS}}, device_row::DeviceRow, device_row_object::DeviceRowObject};
 
@@ -429,30 +429,28 @@ impl MiBandWindow {
     }
     
     /// forwards the MPRIS state to the band
-    /// if this has already been called before, it does nothing
-    fn forward_media(&self) {
-        static START: Once = Once::new();
-        START.call_once(|| {
+    /// if this has already been called before, it returns the existing instance
+    async fn forward_media(&self) -> &Sender<MusicEvent> {
+        static CONTROLLER: OnceCell<Sender<MusicEvent>> = OnceCell::new();
+        CONTROLLER.get_or_init(|| async {
+            let (mpris_tx, mut mpris_rx) = mpsc::channel(1);
+            let (controller_tx, controller_rx) = mpsc::channel(3);
+            spawn_future_local(async move {
+                let _ = watch_mpris(mpris_tx, controller_rx).await;
+            });
             spawn_future_local(clone!(@weak self as win => async move {
-                if let Ok(mpris) = MprisController::init().await {
-                    let (tx, mut rx) = mpsc::channel(1);
-                    spawn_future_local(async move {
-                        let _ = mpris.watch_changes(tx).await;
-                    });
-                    while let Some(item) = rx.next().await {
-                        // make sure there is a current band
-                        if let Some(band) = win.imp().current_device.read().await.as_ref() {
-                            // send it to the band
-                            if let Err(err) = band.set_media_info(&item).await {
-                                win.show_error(&format!("An error occurred while setting the media state: {err}"));
-                            }
+                while let Some(item) = mpris_rx.next().await {
+                    // make sure there is a current band
+                    if let Some(band) = win.imp().current_device.read().await.as_ref() {
+                        // send it to the band
+                        if let Err(err) = band.set_media_info(&item).await {
+                            win.show_error(&format!("An error occurred while setting the media state: {err}"));
                         }
                     }
-                } else {
-                    println!("error in mpris");
                 }
             }));
-        });
+            controller_tx
+        }).await
     }
 
     async fn watch_device_changes(&self, mut shown_devices: HashMap<OwnedObjectPath, DeviceRowObject>) -> band::Result<()> {
