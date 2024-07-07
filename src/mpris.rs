@@ -18,7 +18,7 @@ trait MediaPlayer {
     fn volume(&self) -> zbus::Result<f64>;
     #[zbus(property)]
     fn set_volume(&self, new_volume: f64) -> zbus::Result<()>;
-    #[zbus(property)]
+    #[zbus(property(emits_changed_signal= "false"))]
     fn position(&self) -> zbus::Result<i64>;
     #[zbus(property)]
     fn playback_status(&self) -> zbus::Result<String>;
@@ -88,7 +88,6 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
     let mut metadata_stream = player_proxy.receive_metadata_changed().await.fuse();
     let mut playback_status_stream = player_proxy.receive_playback_status_changed().await.fuse();
     let mut volume_stream = player_proxy.receive_volume_changed().await.fuse();
-    let mut position_stream = player_proxy.receive_position_changed().await.fuse();
 
     let mut current_media_info = MediaInfo::default();
     let mut players_exist = true;
@@ -118,12 +117,6 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
                         current_media_info.track = None;
                         current_media_info.duration = None;
                     }
-                    need_send = true;
-                }
-            },
-            pos = position_stream.next() => {
-                if let Some(pos) = pos {
-                    current_media_info.position = pos.get().await.ok().and_then(|p| p.try_into().ok());
                     need_send = true;
                 }
             },
@@ -191,6 +184,9 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
             _ = debounce_timer.next() => {
                 if need_send && tx.send(
                     if players_exist {
+                        // the position doesn't refresh automatically
+                        current_media_info.position = player_proxy.position().await.ok()
+                            .and_then(|p| p.try_into().ok());
                         Some(current_media_info.clone())
                     } else {
                         None

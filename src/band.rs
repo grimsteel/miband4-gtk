@@ -508,19 +508,18 @@ impl<'a> MiBand<'a> {
         if let Some(media) = media {
             let pos = media.duration.zip(media.position).map(|(dur, pos)| {
                 let ratio = (pos as f64) / (dur as f64);
-                (ratio * (0xffff as f64)) as u16
+                (ratio * (0xff as f64)) as u8
             });
             let pos_bytes = pos.as_ref()
-                .map(|&p| vec![(p & 0xff) as u8, (p >> 8) as u8])
+                .map(|&p| vec![p, 0])
                 .unwrap_or_else(|| vec![0x00, 0x00]);
-            println!("pos bytes {pos_bytes:?}");
             let all_fields = [
                 // always include the position (even if it's just [0x00, 0x00])
                 (0x00u8, Some(pos_bytes)),
                 // track + null term
                 (0x08u8, media.track.as_ref().map(|b| [b.as_bytes(), &[0x00]].concat())),
                 // 0xffff - we scale position and duration to a full u16
-                (0x10u8, pos.map(|_d| vec![0xff, 0xff])),
+                (0x10u8, pos.map(|_d| vec![0xff, 0x0])),
                 // single byte volume
                 (0x40u8, media.volume.map(|d| vec![d]))
             ];
