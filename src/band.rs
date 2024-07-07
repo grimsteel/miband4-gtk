@@ -19,6 +19,7 @@ const CHAR_CONFIG: &'static str = "00000003-0000-3512-2118-0009af100700";
 const CHAR_SETTINGS: &'static str = "00000008-0000-3512-2118-0009af100700";
 const CHAR_ALERT: &'static str = "00002a46-0000-1000-8000-00805f9b34fb";
 const CHAR_CHUNKED_TRANSFER: &'static str = "00000020-0000-3512-2118-0009af100700";
+const CHAR_MUSIC_NOTIFICATIONS: &'static str = "00000010-0000-3512-2118-0009af100700";
 
 #[derive(Debug)]
 struct BandChars<'a> {
@@ -30,7 +31,8 @@ struct BandChars<'a> {
     config: GattCharacteristicProxy<'a>,
     settings: GattCharacteristicProxy<'a>,
     alert: GattCharacteristicProxy<'a>,
-    chunked_transfer: GattCharacteristicProxy<'a>
+    chunked_transfer: GattCharacteristicProxy<'a>,
+    music_notifs: GattCharacteristicProxy<'a>
 }
 
 #[derive(Debug)]
@@ -220,13 +222,25 @@ impl<'a> MiBand<'a> {
                     band_0.remove(CHAR_CONFIG),
                     band_0.remove(CHAR_SETTINGS),
                     band_0.remove(CHAR_CHUNKED_TRANSFER),
+                    band_0.remove(CHAR_MUSIC_NOTIFICATIONS),
                     device_info.remove(CHAR_SOFT_REV),
                     band_1.remove(CHAR_AUTH),
                     notification.remove(CHAR_ALERT)
                 ) {
-                    (Some(battery), Some(steps), Some(time), Some(config), Some(settings), Some(chunked_transfer), Some(firm_rev), Some(auth), Some(alert)) => {
+                    (
+                        Some(battery),
+                        Some(steps),
+                        Some(time),
+                        Some(config),
+                        Some(settings),
+                        Some(chunked_transfer),
+                        Some(music_notifs),
+                        Some(firm_rev),
+                        Some(auth),
+                        Some(alert)
+                    ) => {
                         let chars = BandChars {
-                            battery, steps, time, config, firm_rev, auth, settings, alert, chunked_transfer
+                            battery, steps, time, config, firm_rev, auth, settings, alert, chunked_transfer, music_notifs
                         };
 
                         return Ok(chars);
@@ -467,6 +481,23 @@ impl<'a> MiBand<'a> {
         } else {
             self.write_chunked(0x03, &vec![0x00; 5]).await
         }
+    }
+
+    /// listen for the media button presses
+    pub async fn stream_media_button_events(&self, mut tx: Sender<MusicEvent>) -> Result<()> {
+        if let Some(BandChars { music_notifs, .. }) = &self.chars {
+            let (mut notify, notify_mtu) = music_notifs.acquire_notify_stream().await?;
+            let mut buf = vec![0; notify_mtu as usize];
+
+            loop {
+                let len = notify.read(&mut buf).await?;
+                println!("len: {len}, buf: {:?}", &buf[..len]);
+                if tx.send(MusicEvent::Open).await.is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        } else { Err(BandError::NotInitialized) }
     }
 
 
