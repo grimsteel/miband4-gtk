@@ -160,7 +160,7 @@ pub struct MusicEventListener {
 }
 
 impl Stream for MusicEventListener {
-    type Item = MusicEvent;
+    type Item = Option<MusicEvent>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut buf = vec![0; self.mtu];
@@ -174,20 +174,21 @@ impl Stream for MusicEventListener {
             Ok(match buf[1] {
                 0xe0 => Some(MusicEvent::Open),
                 0xe1 => Some(MusicEvent::Close),
-                d => {
-                    println!("{d}");
-                    None
-                }
+                0x00 | 0x01 => Some(MusicEvent::PlayPause),
+                0x03 => Some(MusicEvent::Next),
+                0x04 => Some(MusicEvent::Previous),
+                0x05 => Some(MusicEvent::VolumeUp),
+                0x06 => Some(MusicEvent::VolumeDown),
+                _ => None
             })
         });
 
         match result {
-            Poll::Ready(Ok(Some(v))) => Poll::Ready(Some(v)),
             // fatal - stream must end
             Poll::Ready(Err(_)) => Poll::Ready(None),
             // the band sent data we don't recognize, but it's not fatal
             // we just don't have data to send
-            Poll::Ready(Ok(None)) => Poll::Pending,
+            Poll::Ready(Ok(a)) => Poll::Ready(Some(a)),
             Poll::Pending => Poll::Pending
         }
     }
@@ -505,15 +506,23 @@ impl<'a> MiBand<'a> {
 
     pub async fn set_media_info(&self, media: &Option<MediaInfo>) -> Result<()> {
         if let Some(media) = media {
-            let pos = media.position.unwrap_or_default();
+            let pos = media.duration.zip(media.position).map(|(dur, pos)| {
+                let ratio = (pos as f64) / (dur as f64);
+                (ratio * (0xffff as f64)) as u16
+            });
+            let pos_bytes = pos.as_ref()
+                .map(|&p| vec![(p & 0xff) as u8, (p >> 8) as u8])
+                .unwrap_or_else(|| vec![0x00, 0x00]);
+            println!("pos bytes {pos_bytes:?}");
             let all_fields = [
                 // always include the position (even if it's just [0x00, 0x00])
-                (0x00u8, Some(vec![(pos & 0xff) as u8, (pos > 8) as u8])),
+                (0x00u8, Some(pos_bytes)),
                 // track + null term
                 (0x08u8, media.track.as_ref().map(|b| [b.as_bytes(), &[0x00]].concat())),
-                // big endian duration + volume
-                (0x10u8, media.duration.map(|d| vec![(d & 0xff) as u8, (d > 8) as u8])),
-                (0x40u8, media.volume.map(|d| vec![(d & 0xff) as u8, (d > 8) as u8]))
+                // 0xffff - we scale position and duration to a full u16
+                (0x10u8, pos.map(|_d| vec![0xff, 0xff])),
+                // single byte volume
+                (0x40u8, media.volume.map(|d| vec![d]))
             ];
             let (flags, bufs): (Vec<u8>, Vec<Vec<u8>>) = all_fields.into_iter()
                 .filter_map(|(flag, buf)| {
@@ -533,7 +542,8 @@ impl<'a> MiBand<'a> {
 
             self.write_chunked(0x03, &buf).await
         } else {
-            self.write_chunked(0x03, &vec![0x00; 5]).await
+            // no music is playing
+            self.write_chunked(0x03, &[0x40 | 0x20, 0x00]).await
         }
     }
 

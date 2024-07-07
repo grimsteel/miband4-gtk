@@ -449,7 +449,6 @@ impl MiBandWindow {
                     // make sure there is a current band
                     if let Some(band) = win.imp().current_device.read().await.as_ref() {
                         // send it to the band
-                        println!("sent {:?} to the band", item);
                         if let Err(err) = band.set_media_info(&item).await {
                             win.show_error(&format!("An error occurred while setting the media state: {err}"));
                         }
@@ -479,8 +478,8 @@ impl MiBandWindow {
                                     break;
                                 },
                                 event = music_events.next() => {
-                                    if let Some(event) = event {
-                                        println!("music event: {:?}", event);
+                                    // send all events to the mpris controller
+                                    if let Some(Some(event)) = event {
                                         if mpris_controller_tx.send(event).await.is_err() {
                                             break;
                                         }
@@ -488,7 +487,6 @@ impl MiBandWindow {
                                 }
                             }
                         }
-                        println!("stopped media");
                     },
                     Err(err) => {
                         win.show_error(&format!("Error while starting the band media: {err}"));

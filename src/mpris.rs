@@ -52,7 +52,7 @@ pub struct MediaInfo {
     pub state: MediaState
 }
 
-const STREAM_THROTTLE: Duration = Duration::from_secs(1);
+const STREAM_THROTTLE: Duration = Duration::from_millis(100);
 
 pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: Receiver<MusicEvent>) -> zbus::Result<()> {
     let conn = Connection::session().await?;
@@ -70,8 +70,20 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
 
     let _ = tx.send(None).await;
 
-    // wait for at least one player to start before proceeding
-    while let Some(false) = players_stream.next().await {}
+    loop {
+        select! {
+            // wait for at least one player to start before proceeding
+            players_exist = players_stream.next() => {
+                if players_exist.unwrap_or(false) { break; }
+            }
+            // but make sure to respond to controller requests
+            controller_event = controller_rx.next() => {
+                if controller_event == Some(MusicEvent::Open) {
+                    let _ = tx.send(None).await;
+                }
+            }
+        }
+    }
     
     let mut metadata_stream = player_proxy.receive_metadata_changed().await.fuse();
     let mut playback_status_stream = player_proxy.receive_playback_status_changed().await.fuse();
@@ -137,16 +149,15 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
                     need_send = true;
                 }
             },
-            event = controller_rx.next() => {
-                // the position doesn't refresh automatically
-                current_media_info.position = player_proxy.position().await.ok().and_then(|p| p.try_into().ok());
-                println!("got an event {event:?}");
-
-                match event {
+            controller_event = controller_rx.next() => {
+                match controller_event {
                     Some(MusicEvent::Open) => {
                         // immediately send an update
                         if tx.send(
                             if players_exist {
+                                // the position doesn't refresh automatically
+                                current_media_info.position = player_proxy.position().await.ok()
+                                    .and_then(|p| p.try_into().ok());
                                 Some(current_media_info.clone())
                             } else {
                                 None
@@ -157,7 +168,23 @@ pub async fn watch_mpris(mut tx: Sender<Option<MediaInfo>>, mut controller_rx: R
                             need_send = false;
                         }
                     },
-                    _ => {}
+                    Some(MusicEvent::PlayPause) => {
+                        // ignore errors
+                        let _ = player_proxy.play_pause().await;
+                    },
+                    Some(MusicEvent::Previous) => {
+                        let _ = player_proxy.previous().await;
+                    },
+                    Some(MusicEvent::Next) => {
+                        let _ = player_proxy.next().await;
+                    },
+                    Some(a @ (MusicEvent::VolumeUp | MusicEvent::VolumeDown)) => {
+                        if let Ok(vol) = player_proxy.volume().await {
+                            let new_vol = vol + if a == MusicEvent::VolumeUp { 0.05f64 } else { -0.05f64 };
+                            let _ = player_proxy.set_volume(new_vol).await;
+                        }
+                    },
+                    None | Some(MusicEvent::Close) => {}
                 }
             },
             // once second has passed since the last update
