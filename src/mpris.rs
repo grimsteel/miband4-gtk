@@ -1,8 +1,9 @@
 use std::{collections::HashMap, time::{Duration, Instant}};
 
 use async_io::Timer;
+use async_lock::Mutex;
 use zbus::{proxy, Connection, zvariant::Value};
-use futures::{channel::mpsc::Sender, pin_mut, select, stream::StreamExt, SinkExt};
+use futures::{channel::mpsc::{self, Receiver, Sender}, pin_mut, select, stream::StreamExt, SinkExt};
 
 #[proxy(default_path = "/org/mpris/MediaPlayer2", interface = "org.mpris.MediaPlayer2.Player", gen_blocking = false, default_service = "org.mpris.MediaPlayer2.playerctld")]
 trait MediaPlayer {
@@ -30,7 +31,8 @@ trait PlayerCtlD {
 
 pub struct MprisController<'a> {
     player_proxy: MediaPlayerProxy<'a>,
-    playerctl_proxy: PlayerCtlDProxy<'a>
+    playerctl_proxy: PlayerCtlDProxy<'a>,
+    refresh_tx: Mutex<Option<Sender<()>>>
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -64,8 +66,15 @@ impl<'a> MprisController<'a> {
         let playerctl_proxy = PlayerCtlDProxy::new(&conn).await?;
         Ok(Self {
             player_proxy,
-            playerctl_proxy
+            playerctl_proxy,
+            refresh_tx: Mutex::new(None)
         })
+    }
+
+    pub async fn trigger_refresh(&self) {
+        if let Some(sender) = self.refresh_tx.lock().await.as_mut() {
+            let _ = sender.send(()).await;
+        }
     }
 
     pub async fn watch_changes(&self, mut tx: Sender<Option<MediaInfo>>) -> zbus::Result<()> {
@@ -84,6 +93,11 @@ impl<'a> MprisController<'a> {
 
         // wait for at least one player to start before proceeding
         while let Some(false) = players_stream.next().await {}
+
+        // setup the force refresh stream
+        let (refresh_tx, refresh_rx) = mpsc::channel(1);
+        *self.refresh_tx.lock().await = Some(refresh_tx);
+        let mut refresh_rx = refresh_rx.fuse();
         
         let mut metadata_stream = self.player_proxy.receive_metadata_changed().await.fuse();
         let mut playback_status_stream = self.player_proxy.receive_playback_status_changed().await.fuse();
@@ -148,6 +162,11 @@ impl<'a> MprisController<'a> {
                         current_media_info.state = status;
                         need_send = true;
                     }
+                },
+                _ = refresh_rx.next() => {
+                    // the position doesn't refresh automatically
+                    current_media_info.position = self.player_proxy.position().await.ok().and_then(|p| p.try_into().ok());
+                    need_send = true;
                 },
                 _ = timer.next() => {}
             };

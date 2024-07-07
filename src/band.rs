@@ -312,7 +312,7 @@ impl<'a> MiBand<'a> {
                     (false, false) => 0x40
                 } | message_type;
                 // 0x00 <flag> <num chunks> <data...>
-                [&[0x00, flag, (num_chunks & 0xff) as u8], chunk].concat()
+                [&[0x00, flag, (i & 0xff) as u8], chunk].concat()
             }).collect();
 
             // write all of the chunks
