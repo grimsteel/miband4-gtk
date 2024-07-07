@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use futures::{AsyncReadExt, AsyncWriteExt,  Stream, StreamExt, stream::select};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
-use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
+use crate::{bluez::{BluezSession, DeviceProxy, DiscoveredDevice, DiscoveredDeviceEvent, DiscoveryFilter, GattCharacteristicProxy}, mpris::MediaInfo, store::{self, ActivityGoal, BandLock}, utils::encrypt_value};
 
 const SERVICE_BAND_0: &'static str = "0000fee0-0000-1000-8000-00805f9b34fb";
 const SERVICE_BAND_1: &'static str = "0000fee1-0000-1000-8000-00805f9b34fb";
@@ -433,6 +433,17 @@ impl<'a> MiBand<'a> {
         } else { Err(BandError::NotInitialized) }
     }
 
+    pub async fn set_media_info(&self, media: &Option<MediaInfo>) -> Result<()> {
+        if let Some(media) = media {
+            // TODO: build buffer
+        } else {
+            self.write_chunked(0x03, &[0x00, 0x00, 0x00, 0x00, 0x00]);
+        }
+    }
+
+
+    // ===== STATIC STRUCT METHODS ===== //
+    
     pub async fn get_known_bands<'b>(session: &'b BluezSession<'b>) -> Result<Vec<DiscoveredDevice>> {
         let existing_devices = session.get_devices().await?;
         Ok(existing_devices.into_iter().filter(|device| device.services.contains(SERVICE_BAND_0)).collect())

@@ -48,10 +48,10 @@ impl Default for MediaState {
 
 #[derive(Debug, Default, Clone)]
 pub struct MediaInfo {
-    pub track: String,
-    pub volume: u8, // 0 to 100
-    pub position: u64,
-    pub duration: u64,
+    pub track: Option<String>,
+    pub volume: Option<u8>, // 0 to 100
+    pub position: Option<u64>,
+    pub duration: Option<u64>,
     pub state: MediaState
 }
 
@@ -107,29 +107,31 @@ impl<'a> MprisController<'a> {
                     if let Some(metadata) = metadata {
                         if let Ok(metadata) = metadata.get().await {
                             let title = metadata.get("xesam:title").and_then(|s| s.downcast_ref().ok()).unwrap_or("Unknown title");
-                            let duration_micros: i64 = metadata.get("mpris:length").and_then(|s| s.downcast_ref().ok()).unwrap_or_default();
-                            current_media_info.track = title.into();
-                            current_media_info.duration = duration_micros.try_into().unwrap_or_default();
+                            let duration_micros: Option<u64> = metadata
+                                .get("mpris:length")
+                                .and_then(|s| s.downcast_ref::<i64>().ok())
+                                .and_then(|s| s.try_into().ok());
+                            current_media_info.track = Some(title.into());
+                            current_media_info.duration = duration_micros;
                         } else {
                             // set default values
-                            current_media_info.track = "".into();
-                            current_media_info.duration = 0;
+                            current_media_info.track = None;
+                            current_media_info.duration = None;
                         }
                         need_send = true;
                     }
                 },
                 pos = position_stream.next() => {
                     if let Some(pos) = pos {
-                        let pos = pos.get().await.unwrap_or_default();
-                        current_media_info.position = pos.try_into().unwrap_or_default();
+                        current_media_info.position = pos.get().await.ok().and_then(|p| p.try_into().ok());
                         need_send = true;
                     }
                 },
                 volume = volume_stream.next() => {
                     if let Some(volume) = volume {
-                        let volume = volume.get().await.unwrap_or_default();
-                        // add bounds to the volume and cast to u8
-                        let volume = (volume * 100f64).max(0f64).min(100f64) as u8;
+                        let volume = volume.get().await.map(|v| 
+                                                            // add bounds to the volume and cast to u8
+                                                            (v * 100f64).max(0f64).min(100f64) as u8).ok();
                         current_media_info.volume = volume;
                         need_send = true;
                     }
