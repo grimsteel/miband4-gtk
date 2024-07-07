@@ -20,3 +20,13 @@ You'll need `gtk4` (version 4.10 or higher) (`libgtk-4-dev`) installed.
 ```sh
 cargo build
 ```
+
+
+## Features
+
+* Current Activity Data
+* Time
+* Battery
+* Music (syncs with MPRIS using `playerctld`)
+* Notifications (uses `org.freedesktop.Notifications`)
+* Band Lock
