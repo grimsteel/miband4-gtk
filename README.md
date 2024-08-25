@@ -30,3 +30,5 @@ cargo build
 * Music (syncs with MPRIS using `playerctld`)
 * Notifications (uses `org.freedesktop.Notifications`)
 * Band Lock
+
+![image](https://github.com/user-attachments/assets/5240d071-1f5c-4e9c-b829-71d68b7d5921)
